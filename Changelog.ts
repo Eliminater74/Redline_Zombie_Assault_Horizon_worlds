@@ -11,16 +11,20 @@ class Changelog extends hz.Component<typeof Changelog> {
     const textGizmo = this.entity.as(hz.TextGizmo);
     if (textGizmo) {
         textGizmo.text.set(
-            "=== UPDATE v25.0.0 (Apr 8) ===\n" +
-            "SMART HORDE + STABILITY PASS\n\n" +
-            "• Smarter zombie targeting\n" +
-            "  - Aggro memory + better flanking\n" +
-            "• Better spawn reliability\n" +
-            "  - Stronger refill/replacement logic\n" +
-            "• Watchdog tuned down\n" +
-            "  - Fewer false stuck resets\n" +
-            "• World performance improved\n" +
-            "  - Duplicate map blockers removed\n\n" +
+            "=== UPDATE v25.1.0 (Apr 18) ===\n" +
+            "PERFORMANCE & BUG FIX PASS\n\n" +
+            "• Ammo drops now instant\n" +
+            "  - No more invisible boxes on spawn\n" +
+            "• Zombie kill count now accurate\n" +
+            "  - HUD updates immediately on kill\n" +
+            "• Smoother waves\n" +
+            "  - Fixed phantom zombies after resets\n" +
+            "  - Win condition more reliable\n" +
+            "• Major lag reduction\n" +
+            "  - Removed hundreds of per-frame\n" +
+            "    update loops across all scripts\n" +
+            "• Crash fixes\n" +
+            "  - Stale timers cancelled on cleanup\n\n" +
             "HOLD THE LINE. BREAK YOUR RECORD."
         );
     }
