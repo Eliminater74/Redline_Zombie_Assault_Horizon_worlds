@@ -141,6 +141,8 @@ class WaveManager extends hz.Component<typeof WaveManager> {
   private readonly countBroadcastInterval = 250;
   /** Flag indicating a broadcast is pending */
   private countBroadcastPending = false;
+  /** Handle for the pending deferred broadcast timeout — stored so cleanup() can cancel it. */
+  private countBroadcastTimer: number | null = null;
 
   /** Watchdog State for "Ghost Hunt" */
   private lastActiveCount = -1;
@@ -156,6 +158,8 @@ class WaveManager extends hz.Component<typeof WaveManager> {
   private winConditionPending = false;
   /** Handle for the 1-second win-condition confirmation timer — stored so onWaveReset/Skip can cancel it. */
   private winConditionTimer: number | null = null;
+  /** Handle for the 1-second delay before newWave() in reset/skip — stored to prevent double-fire. */
+  private waveTransitionTimer: number | null = null;
 
   // Kept alive so Horizon's bundle cache stays warm — makes every ammo spawnAsset() call near-instant.
   private ammoPreloader: hz.SpawnController | null = null;
@@ -355,8 +359,9 @@ class WaveManager extends hz.Component<typeof WaveManager> {
       if (now - this.lastCountBroadcastTime < this.countBroadcastInterval) {
           if (!this.countBroadcastPending) {
               this.countBroadcastPending = true;
-              // Schedule broadcast after interval
-              this.async.setTimeout(() => {
+              // BUG FIX: Store handle so cleanup() can cancel before it fires on a dead component.
+              this.countBroadcastTimer = this.async.setTimeout(() => {
+                  this.countBroadcastTimer = null;
                   this.countBroadcastPending = false;
                   // Fetch fresh stats from spawner
                   this.updateZombieCount();
@@ -668,9 +673,13 @@ class WaveManager extends hz.Component<typeof WaveManager> {
 
     // Force kill connected zombies to clear the board
     this.spawner.forceKillAll();
-    
-    // Restart wave after short delay to allow cleanup
-    this.async.setTimeout(() => {
+
+    // BUG FIX: Store handle — rapid double-reset could queue two concurrent newWave() calls.
+    if (this.waveTransitionTimer !== null) {
+        this.async.clearTimeout(this.waveTransitionTimer);
+    }
+    this.waveTransitionTimer = this.async.setTimeout(() => {
+        this.waveTransitionTimer = null;
         this.newWave();
     }, 1000);
   }
@@ -696,6 +705,11 @@ class WaveManager extends hz.Component<typeof WaveManager> {
 
     this.spawner.forceKillAll();
 
+    // BUG FIX: Store handle — rapid double-skip could queue two concurrent newWave() calls.
+    if (this.waveTransitionTimer !== null) {
+        this.async.clearTimeout(this.waveTransitionTimer);
+    }
+
     // Increment Wave
     wave++;
     health = Math.min(health * healthIncrease, maxHealth);
@@ -706,7 +720,8 @@ class WaveManager extends hz.Component<typeof WaveManager> {
     }
     
     // Restart
-    this.async.setTimeout(() => {
+    this.waveTransitionTimer = this.async.setTimeout(() => {
+        this.waveTransitionTimer = null;
         this.newWave();
     }, 1000);
   }
@@ -715,6 +730,14 @@ class WaveManager extends hz.Component<typeof WaveManager> {
     if (this.winConditionTimer !== null) {
       this.async.clearTimeout(this.winConditionTimer);
       this.winConditionTimer = null;
+    }
+    if (this.countBroadcastTimer !== null) {
+      this.async.clearTimeout(this.countBroadcastTimer);
+      this.countBroadcastTimer = null;
+    }
+    if (this.waveTransitionTimer !== null) {
+      this.async.clearTimeout(this.waveTransitionTimer);
+      this.waveTransitionTimer = null;
     }
     if (this.ammoPreloader !== null) {
       try { this.ammoPreloader.dispose(); } catch (e) { /* ignore */ }

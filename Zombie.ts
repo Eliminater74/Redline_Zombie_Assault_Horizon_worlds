@@ -104,6 +104,10 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
   private lastAttackAnimTime = 0;
   /** Distance in meters at which attack can be performed */
   private attackRange = 2.5;
+  // BUG FIX: Store attack animation timer handles so cleanup() can cancel them when zombie
+  // is unloaded mid-attack, preventing callbacks from firing on a destroyed entity.
+  private attackSpeedTimer: number | null = null;
+  private attackDamageTimer: number | null = null;
 
   /** Timestamp of last proximity alert sent to HUD */
   private lastProximityCheckTime = 0;
@@ -233,6 +237,20 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
 
   start(): void {
     // Initialization handled in reviveZombie
+  }
+
+  // HORIZON BUG WORKAROUND: Timer/Interval race conditions after destroy — cancel attack timers in cleanup()
+  // so they don't fire on an already-unloaded entity between the attack animation starting and landing.
+  cleanup(): void {
+    if (this.attackSpeedTimer !== null) {
+      this.async.clearTimeout(this.attackSpeedTimer);
+      this.attackSpeedTimer = null;
+    }
+    if (this.attackDamageTimer !== null) {
+      this.async.clearTimeout(this.attackDamageTimer);
+      this.attackDamageTimer = null;
+    }
+    unregisterZombie(this);
   }
 
   // ============================================================================
@@ -933,7 +951,9 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
       });
 
       // Stop lunge after 300ms
-      this.async.setTimeout(() => {
+      if (this.attackSpeedTimer !== null) this.async.clearTimeout(this.attackSpeedTimer);
+      this.attackSpeedTimer = this.async.setTimeout(() => {
+          this.attackSpeedTimer = null;
           // FIX: Validate entity before accessing agent (prevents "Entity ID not valid" errors)
           try {
               if (this.alive && this.entity.isValidReference.get()) {
@@ -943,7 +963,9 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
       }, 300);
 
       // Damage check at 625ms (animation timing)
-      this.async.setTimeout(() => {
+      if (this.attackDamageTimer !== null) this.async.clearTimeout(this.attackDamageTimer);
+      this.attackDamageTimer = this.async.setTimeout(() => {
+          this.attackDamageTimer = null;
         // FIX: Validate entity before accessing properties
         try {
             if (!this.entity.isValidReference.get()) return;

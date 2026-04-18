@@ -29,6 +29,11 @@ export class SpawnManager {
   private zombieToController = new Map<bigint, hz.SpawnController>();
   private spawnCooldowns: Map<string, number> = new Map();
   private dyingZombies = new Set<hz.Entity>();
+  // BUG FIX: Track dying zombies by ID (bigint) instead of object reference.
+  // hz.Entity wrappers from different call sites (rootEntities.get() vs Events.zombieDeath data)
+  // are different JS objects for the same entity, so Set.has() by reference always returns false.
+  // Using IDs ensures dying zombies are properly excluded from getActiveCount().
+  private dyingZombieIds = new Set<bigint>();
   
   // WAVE STATE
   public zombiesRemainingToSpawn = 0;
@@ -135,6 +140,7 @@ export class SpawnManager {
       }
       this.controllers = [];
       this.dyingZombies.clear();
+      this.dyingZombieIds.clear();
       this.reservedControllers.clear();
       this.zombieToController.clear();
       this.controllerTimestamps.clear();
@@ -159,6 +165,7 @@ export class SpawnManager {
       }
       // Reset counters immediately
       this.dyingZombies.clear();
+      this.dyingZombieIds.clear();
       this.zombiesRemainingToSpawn = 0;
       this.pendingSpawnCount = 0;
       this.killedZombiesCount = 0;
@@ -397,6 +404,9 @@ export class SpawnManager {
         const controller = sc;
         this.zombieToController.delete(zombie.id);
         this.dyingZombies.add(zombie);
+        // BUG FIX: Track by ID — entity wrappers from rootEntities.get() vs event data are
+        // different JS objects, so Set.has() by reference returns false. ID comparison is reliable.
+        try { this.dyingZombieIds.add(zombie.id); } catch {}
         this.notifyUpdate();
 
         // BUG FIX: Capture current generation so these timers self-discard after a
@@ -408,15 +418,21 @@ export class SpawnManager {
             this.async.setTimeout(() => {
                 if (this.waveGeneration !== gen) return;
                 this.dyingZombies.delete(zombie);
+                try { this.dyingZombieIds.delete(zombie.id); } catch {}
                 this.killedZombiesCount++;
                 this.notifyUpdate();
                 this.checkAndRecycle(controller, gen);
             }, 1000);
         }, ZOMBIE_REMOVAL_DELAY * 1000);
       } else {
-        console.warn("[SpawnManager] Zombie death received with no controller match; issuing replacement.");
-        this.zombiesRemainingToSpawn++;
-        this.rebalanceAfterForcedRecycle();
+        // BUG FIX: Guard against spurious refunds during forceKillAll() — isClearing is set
+        // during reset, so any zombie deaths that arrive (via broadcast) while clearing should
+        // be silently dropped rather than inflating zombiesRemainingToSpawn.
+        if (!this.isClearing) {
+            console.warn("[SpawnManager] Zombie death received with no controller match; issuing replacement.");
+            this.zombiesRemainingToSpawn++;
+            this.rebalanceAfterForcedRecycle();
+        }
       }
   }
 
@@ -461,7 +477,8 @@ export class SpawnManager {
 
           const roots = sc.rootEntities.get();
           if (!roots || roots.length === 0) return false;
-          if (this.dyingZombies.has(roots[0])) return false;
+          // BUG FIX: Use ID-based comparison — reference equality fails across call sites.
+          try { if (this.dyingZombieIds.has(roots[0].id)) return false; } catch {}
           return true;
       }).length;
   }
