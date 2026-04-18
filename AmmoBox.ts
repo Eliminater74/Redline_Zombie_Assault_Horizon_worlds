@@ -26,6 +26,10 @@ class AmmoBox extends hz.Component<typeof AmmoBox> {
   }
 
   start(): void {
+    // Ensure visibility — prefab may have visible=false set in the editor to hide it at origin on load.
+    // Without this, the entity spawns invisible and stays that way until Horizon forces a replication sync.
+    this.entity.visible.set(true);
+
     // 1. Trigger Logic
     if (this.props.trigger) {
       this.connectCodeBlockEvent(
