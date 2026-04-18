@@ -358,12 +358,12 @@ export class SpawnManager {
           this.controllers.forEach(sc => {
               const state = sc.currentState.get();
               const startTime = this.controllerTimestamps.get(sc);
-              
+
               // JANITOR: If stuck in Loading for too long or Active without entity
               if (startTime && (now - startTime > JANITOR_STUCK_MS)) {
                   const roots = sc.rootEntities.get();
                   const noRoots = !roots || roots.length === 0;
-                   
+
                   if (state === hz.SpawnState.Loading || (state === hz.SpawnState.Active && noRoots)) {
                       console.warn(`[SpawnManager] JANITOR: Reclaiming stuck controller (State: ${state}, NoRoots: ${noRoots})`);
                       if (roots && roots.length > 0) {
@@ -373,7 +373,7 @@ export class SpawnManager {
                       // Clear state to let them be picked up in next rotation
                       this.controllerTimestamps.delete(sc);
                       this.reservedControllers.delete(sc);
-                       
+
                       // Safety: Check if we need to decrement pending if it was stuck in loading
                       if (state === hz.SpawnState.Loading && this.pendingSpawnCount > 0) {
                           this.pendingSpawnCount--;
@@ -383,6 +383,11 @@ export class SpawnManager {
                   }
               }
           });
+
+          // HEARTBEAT: Always ping WaveManager so the win condition can re-check.
+          // Without this, if the one-shot notifyUpdate() from the last zombie's
+          // cleanup timer is missed (throttle race), the win condition never retries.
+          this.notifyUpdate();
       }, 5000); // Check every 5 seconds
   }
 
