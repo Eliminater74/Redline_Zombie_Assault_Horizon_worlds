@@ -22,6 +22,9 @@ class npcAutoTurner extends hz.Component<typeof npcAutoTurner> {
   private engagementPhase: NpcEngagementPhase = NpcEngagementPhase.Idle;
   private targetPosition?: hz.Vec3;
   private isTurning: boolean = false;
+  // PERF FIX: Replaced World.onUpdate (60fps) with 100ms interval — NPC angle checks don't need frame accuracy.
+  private updateInterval: number | null = null;
+  private static readonly TICK_DT = 0.1;
 
   preStart() {
     this.npc = this.props.npc!.as(Npc);
@@ -29,12 +32,19 @@ class npcAutoTurner extends hz.Component<typeof npcAutoTurner> {
     this.connectNetworkEvent(this.npc!, NpcEvents.OnNpcEngagementChanged, (data) => {
       this.handleEngagementPhase(this.npc!, data.phase);
     });
+  }
 
-    this.connectLocalBroadcastEvent(hz.World.onUpdate, data => this.onUpdate(data.deltaTime));
+  // HORIZON BUG WORKAROUND: Timer/Interval race conditions after destroy — cancel in cleanup().
+  cleanup(): void {
+    if (this.updateInterval !== null) {
+      this.async.clearInterval(this.updateInterval);
+      this.updateInterval = null;
+    }
   }
 
   async start() {
     this.npcPlayer = await this.npc?.tryGetPlayer();
+    this.updateInterval = this.async.setInterval(() => this.onUpdate(npcAutoTurner.TICK_DT), 100);
   }
 
   onUpdate(deltaTime:number) {

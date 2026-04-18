@@ -9,10 +9,11 @@ class HealthPickup extends hz.Component<typeof HealthPickup> {
   };
 
   private isCollected = false;
+  // PERF FIX: Replaced World.onUpdate (60fps) with a 50ms interval (20fps) — spin animation only.
+  private updateInterval: number | null = null;
+  private static readonly TICK_DT = 0.05;
 
   start(): void {
-    // 1. Trigger Logic
-    // Use the linked trigger OR default to this entity itself
     const targetTrigger = this.props.trigger ?? this.entity;
 
     this.connectCodeBlockEvent(
@@ -20,25 +21,27 @@ class HealthPickup extends hz.Component<typeof HealthPickup> {
       hz.CodeBlockEvents.OnPlayerEnterTrigger,
       this.onPlayerEnter.bind(this)
     );
-    
-    // 2. Rotation
-    this.connectLocalBroadcastEvent(
-      hz.World.onUpdate, 
-      this.onUpdate.bind(this)
-    );
+
+    this.updateInterval = this.async.setInterval(() => this.onTick(), 50);
+  }
+
+  // HORIZON BUG WORKAROUND: Timer/Interval race conditions after destroy — cancel in cleanup().
+  cleanup(): void {
+    if (this.updateInterval !== null) {
+      this.async.clearInterval(this.updateInterval);
+      this.updateInterval = null;
+    }
   }
 
   private onPlayerEnter(player: hz.Player): void {
     if (this.isCollected) return;
     this.isCollected = true;
 
-    // Send the Heal Event
-    this.sendLocalBroadcastEvent(Events.healPlayer, { 
-        amount: this.props.healAmount, 
-        player: player 
+    this.sendLocalBroadcastEvent(Events.healPlayer, {
+        amount: this.props.healAmount,
+        player: player
     });
 
-    // Play Sound
     if (this.props.pickupSFX) {
         const audio = this.props.pickupSFX.as(hz.AudioGizmo);
         if (audio) {
@@ -48,23 +51,18 @@ class HealthPickup extends hz.Component<typeof HealthPickup> {
         }
     }
 
-    // Destroy
     this.world.deleteAsset(this.entity);
   }
 
-  private onUpdate(data: { deltaTime: number }): void {
-    // FIX: Skip if already collected/deleted
+  private onTick(): void {
     if (this.isCollected) return;
 
-    // FIX: Validate entity is still valid
     try {
         if (!this.entity.isValidReference.get()) return;
     } catch (e) { return; }
 
-    const rotationSpeed = data.deltaTime * 2;
-    const currentRot = this.entity.rotation.get();
-    const rotChange = hz.Quaternion.fromAxisAngle(hz.Vec3.up, rotationSpeed);
-    this.entity.rotation.set(currentRot.mul(rotChange));
+    const rotChange = hz.Quaternion.fromAxisAngle(hz.Vec3.up, HealthPickup.TICK_DT * 2);
+    this.entity.rotation.set(this.entity.rotation.get().mul(rotChange));
   }
 }
 
