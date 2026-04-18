@@ -34,6 +34,9 @@ class LobbySpawnGuard extends hz.Component<typeof LobbySpawnGuard> {
 
   private lobbySpawns: hz.Entity[] = [];
   private spawnIndex = 0; // Round-robin counter
+  // BUG FIX: Track per-player spawn-delay timers so cleanup() can cancel them
+  // and players who leave during the delay window don't get teleported.
+  private pendingSpawns = new Map<number, number>();
 
   start(): void {}
 
@@ -53,6 +56,19 @@ class LobbySpawnGuard extends hz.Component<typeof LobbySpawnGuard> {
       (player: hz.Player) => this.onPlayerJoin(player)
     );
 
+    // Track players leaving so we can cancel their pending spawn timer.
+    this.connectCodeBlockEvent(
+      this.entity,
+      hz.CodeBlockEvents.OnPlayerExitWorld,
+      (player: hz.Player) => {
+        const timer = this.pendingSpawns.get(player.id);
+        if (timer !== undefined) {
+          this.async.clearTimeout(timer);
+          this.pendingSpawns.delete(player.id);
+        }
+      }
+    );
+
     // 2. Catch zone for fallen players
     if (this.props.catchZone) {
       this.connectCodeBlockEvent(
@@ -63,6 +79,12 @@ class LobbySpawnGuard extends hz.Component<typeof LobbySpawnGuard> {
     }
   }
 
+  // HORIZON BUG WORKAROUND: Timer/Interval race conditions after destroy — cancel all timers in cleanup().
+  cleanup(): void {
+    this.pendingSpawns.forEach(timer => this.async.clearTimeout(timer));
+    this.pendingSpawns.clear();
+  }
+
   private isEditor(player: hz.Player): boolean {
     return AccessControl.hasAccess(player, this.entity);
   }
@@ -70,11 +92,15 @@ class LobbySpawnGuard extends hz.Component<typeof LobbySpawnGuard> {
   private onPlayerJoin(player: hz.Player) {
     if (this.lobbySpawns.length === 0) return;
     if (this.isEditor(player)) return; // Editors can spawn anywhere
-    
-    // Wait for physics to settle, then teleport
-    this.async.setTimeout(() => {
+
+    // Wait for physics to settle, then teleport.
+    const timer = this.async.setTimeout(() => {
+      this.pendingSpawns.delete(player.id);
+      // Re-validate — player may have left during the delay window.
+      if (!player.isValidReference.get()) return;
       this.teleportToLobby(player);
     }, (this.props.spawnDelay ?? 1.5) * 1000);
+    this.pendingSpawns.set(player.id, timer);
   }
 
   private rescuePlayer(player: hz.Player) {
