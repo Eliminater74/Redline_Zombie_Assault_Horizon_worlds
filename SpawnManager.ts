@@ -11,8 +11,7 @@ import { spawnLocations } from 'ZombieSpawnPoint';
 // POOL CONFIG
 const MAX_CONCURRENT_ZOMBIES = 15;
 const ZOMBIE_REMOVAL_DELAY = 2.5; // Seconds
-const SPAWN_STAGGER_MS = 150;
-const SPAWN_POINT_COOLDOWN_MS = 350;
+const SPAWN_STAGGER_MS = 75;       // Reduced from 150ms — cuts wave-start ramp-up time in half
 const JANITOR_STUCK_MS = 150000;
 
 export class SpawnManager {
@@ -27,7 +26,6 @@ export class SpawnManager {
   private controllerTimestamps: Map<hz.SpawnController, number> = new Map();
   private reservedControllers = new Set<hz.SpawnController>();
   private zombieToController = new Map<bigint, hz.SpawnController>();
-  private spawnCooldowns: Map<string, number> = new Map();
   private dyingZombies = new Set<hz.Entity>();
   // BUG FIX: Track dying zombies by ID (bigint) instead of object reference.
   // hz.Entity wrappers from different call sites (rootEntities.get() vs Events.zombieDeath data)
@@ -202,18 +200,7 @@ export class SpawnManager {
   }
 
   private pickSpawnLocation(candidates: hz.Entity[]): hz.Entity {
-      const now = Date.now();
-
-      const cooled = candidates.filter((location) => {
-          const key = location.id.toString();
-          const last = this.spawnCooldowns.get(key) ?? 0;
-          return now - last >= SPAWN_POINT_COOLDOWN_MS;
-      });
-
-      const pool = cooled.length > 0 ? cooled : candidates;
-      const location = pool[Math.floor(Math.random() * pool.length)];
-      this.spawnCooldowns.set(location.id.toString(), now);
-      return location;
+      return candidates[Math.floor(Math.random() * candidates.length)];
   }
 
   private canScheduleController(sc: hz.SpawnController): boolean {
@@ -224,6 +211,21 @@ export class SpawnManager {
 
       const roots = sc.rootEntities.get();
       return !roots || roots.length === 0;
+  }
+
+  /**
+   * Pre-loads all idle controllers so they're in Loaded state when the next wave's spawn() fires.
+   * Called during the win-condition confirmation window (1s between wave end and wave start),
+   * hiding load latency inside the gap the player already waits through.
+   */
+  public preloadForNextWave(): void {
+      this.controllers.forEach(sc => {
+          try {
+              if (sc.currentState.get() === hz.SpawnState.Unloaded) {
+                  sc.load().catch(() => {});
+              }
+          } catch {}
+      });
   }
 
   /**

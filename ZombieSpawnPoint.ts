@@ -2,7 +2,7 @@ import * as hz from 'horizon/core';
 import { Events } from 'Events';
 
 const QUEUE_TICK_MS = 100;
-const MIN_SPAWN_INTERVAL_MS = 220;
+const MIN_SPAWN_INTERVAL_MS = 100; // Reduced from 220ms — allows spawn points to process queue faster
 
 // Global registry
 export const spawnLocations: hz.Entity[] = [];
