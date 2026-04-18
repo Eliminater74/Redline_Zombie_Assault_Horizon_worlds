@@ -11,7 +11,9 @@ class Knife extends hz.Component<typeof Knife> {
   };
 
   owner!: hz.Player;
-  canHit: boolean = true
+  canHit: boolean = true;
+  // BUG FIX: Store handle so cleanup() can cancel an in-flight cooldown when the knife is despawned.
+  private hitCooldownTimer: number | null = null;
 
   preStart(): void {
     // Safety check for owner
@@ -22,6 +24,14 @@ class Knife extends hz.Component<typeof Knife> {
     
     if(this.props.trigger)
       this.connectCodeBlockEvent(this.props.trigger, hz.CodeBlockEvents.OnEntityEnterTrigger, this.hitZombie.bind(this))
+  }
+
+  // HORIZON BUG WORKAROUND: Timer/Interval race conditions after destroy — cancel all timers in cleanup().
+  cleanup(): void {
+    if (this.hitCooldownTimer !== null) {
+      this.async.clearTimeout(this.hitCooldownTimer);
+      this.hitCooldownTimer = null;
+    }
   }
 
   start() {
@@ -64,11 +74,12 @@ class Knife extends hz.Component<typeof Knife> {
       }
     }
     
-    this.canHit = false
-    
-    this.async.setTimeout(()=>{
-      this.canHit = true
-    }, hitDelay * 1000)
+    this.canHit = false;
+
+    this.hitCooldownTimer = this.async.setTimeout(() => {
+      this.hitCooldownTimer = null;
+      this.canHit = true;
+    }, hitDelay * 1000);
   }
 
   isLocal(): boolean { 
