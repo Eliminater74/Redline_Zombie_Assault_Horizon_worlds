@@ -157,6 +157,9 @@ class WaveManager extends hz.Component<typeof WaveManager> {
   /** Handle for the 1-second win-condition confirmation timer — stored so onWaveReset/Skip can cancel it. */
   private winConditionTimer: number | null = null;
 
+  // Kept alive so Horizon's bundle cache stays warm — makes every ammo spawnAsset() call near-instant.
+  private ammoPreloader: hz.SpawnController | null = null;
+
   private spawner!: SpawnManager;
 
   // -------------------------------------------------------------------------
@@ -200,6 +203,12 @@ class WaveManager extends hz.Component<typeof WaveManager> {
 
     // Clean up any leftover controllers from previous session
     this.spawner.clearControllers();
+
+    // Preload the ammo asset so the bundle is cached — eliminates the spawn delay on first zombie drop.
+    if (this.props.ammo) {
+      this.ammoPreloader = new hz.SpawnController(this.props.ammo, hz.Vec3.zero, hz.Quaternion.one, hz.Vec3.one);
+      this.ammoPreloader.load().catch(() => {});
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -567,14 +576,18 @@ class WaveManager extends hz.Component<typeof WaveManager> {
     if (Math.random() < ammoChance && this.props.ammo) {
       const pos = zombie.position.get().add(hz.Vec3.up);
       const rot = hz.Quaternion.fromEuler(new hz.Vec3(90, 0, 90));
-      this.world.spawnAsset(this.props.ammo, pos, rot).then(entities => {
-        // HORIZON BUG WORKAROUND: SpawnGizmo null checks — spawnAsset can return empty array; null-check each result.
-        if (!entities || entities.length === 0) {
-          console.warn("[WaveManager] spawnAsset returned no entities for ammo pickup.");
-          return;
-        }
-        entities.forEach(e => { if (e) this.spawnedAmmo.push(e); });
-      }).catch(e => {
+      // Use SpawnController so the preloaded bundle cache is hit — load() is near-instant after preStart preload.
+      const sc = new hz.SpawnController(this.props.ammo, pos, rot, hz.Vec3.one);
+      sc.load()
+        .then(() => sc.spawn())
+        .then(() => {
+          const entities = sc.rootEntities.get();
+          if (!entities || entities.length === 0) {
+            console.warn("[WaveManager] spawnAsset returned no entities for ammo pickup.");
+            return;
+          }
+          entities.forEach(e => { if (e) this.spawnedAmmo.push(e); });
+        }).catch(e => {
         console.error("[WaveManager] Failed to spawn ammo pickup:", e);
       });
     }
@@ -696,6 +709,17 @@ class WaveManager extends hz.Component<typeof WaveManager> {
     this.async.setTimeout(() => {
         this.newWave();
     }, 1000);
+  }
+
+  cleanup(): void {
+    if (this.winConditionTimer !== null) {
+      this.async.clearTimeout(this.winConditionTimer);
+      this.winConditionTimer = null;
+    }
+    if (this.ammoPreloader !== null) {
+      try { this.ammoPreloader.dispose(); } catch (e) { /* ignore */ }
+      this.ammoPreloader = null;
+    }
   }
 }
 
