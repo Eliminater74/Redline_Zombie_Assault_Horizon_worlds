@@ -3,33 +3,56 @@ import { Events } from 'Events';
 
 class FloatingDamage extends hz.Component<typeof FloatingDamage> {
   static propsDefinition = {
-    trigger: { type: hz.PropTypes.Entity }, // Optional trigger functionality if needed? Standard convention.
-    textGizmo: { type: hz.PropTypes.Entity }, // The TextGizmo displaying the number
+    trigger: { type: hz.PropTypes.Entity },
+    textGizmo: { type: hz.PropTypes.Entity },
   };
 
   private startTime = 0;
   private startPos: hz.Vec3 = hz.Vec3.zero;
   private initialized = false;
-  private lifeTime = 1500; // 1.5 seconds
+  private lifeTime = 1500; // ms
+
+  // PERF FIX: Replaced World.onUpdate (60 FPS per instance) with a 50ms setInterval.
+  // Dozens of simultaneous damage numbers were adding dozens of per-frame listeners.
+  private floatInterval: number | null = null;
+  // BUG FIX: Store both timeout handles so cleanup() can cancel them.
+  private safetyTimer: number | null = null;
+  private destroyTimer: number | null = null;
 
   start() {
     this.connectNetworkEvent(this.entity, Events.initFloatingDamage, this.onInit.bind(this));
-    this.connectLocalBroadcastEvent(hz.World.onUpdate, this.onUpdate.bind(this));
-    
-    // Immediately clear text to prevent "FloatingDamage" flash on spawn
+
+    // Clear text immediately to prevent "FloatingDamage" flash on spawn.
     try {
         if (this.props.textGizmo && this.props.textGizmo.isValidReference.get()) {
             const text = this.props.textGizmo.as(hz.TextGizmo);
-            if (text) text.text.set(""); 
+            if (text) text.text.set("");
         }
     } catch(e) {}
 
-    // Safety cleanup if never initialized
-    this.async.setTimeout(() => {
+    // Safety: delete self if never initialized (e.g. network event lost).
+    this.safetyTimer = this.async.setTimeout(() => {
+        this.safetyTimer = null;
         if (!this.initialized) {
-             if (this.isServer()) this.world.deleteAsset(this.entity);
+            if (this.isServer()) this.world.deleteAsset(this.entity);
         }
     }, 2000);
+  }
+
+  // HORIZON BUG WORKAROUND: Timer/Interval race conditions after destroy — cancel all timers in cleanup().
+  cleanup(): void {
+    if (this.floatInterval !== null) {
+      this.async.clearInterval(this.floatInterval);
+      this.floatInterval = null;
+    }
+    if (this.safetyTimer !== null) {
+      this.async.clearTimeout(this.safetyTimer);
+      this.safetyTimer = null;
+    }
+    if (this.destroyTimer !== null) {
+      this.async.clearTimeout(this.destroyTimer);
+      this.destroyTimer = null;
+    }
   }
 
   private isServer(): boolean {
@@ -39,46 +62,41 @@ class FloatingDamage extends hz.Component<typeof FloatingDamage> {
     } catch (e) { return false; }
   }
 
-  /**
-   * Called via Network Event to set damage amount and style.
-   */
   private onInit(data: { amount: number, isHeadshot: boolean }) {
     this.initialized = true;
     this.startTime = Date.now();
     this.startPos = this.entity.position.get();
 
-    // Setup Text
     try {
         if (this.props.textGizmo && this.props.textGizmo.isValidReference.get()) {
             const text = this.props.textGizmo.as(hz.TextGizmo);
             if (text) {
-                // Formatting
-                const amount = Math.round(data.amount);
-                text.text.set(amount.toString());
+                text.text.set(Math.round(data.amount).toString());
 
-                // 1. BILLBOARD: Look at local player
                 const localPlayer = this.world.getLocalPlayer();
                 if (localPlayer) {
                     const toPlayer = localPlayer.position.get().sub(this.entity.position.get());
-                    // Simply rotate to look at player. Text is usually +Z or -Z.
-                    // We'll trust lookRotation to +Z.
                     this.entity.rotation.set(hz.Quaternion.lookRotation(toPlayer, hz.Vec3.up).mul(hz.Quaternion.fromEuler(new hz.Vec3(0, 180, 0))));
                 }
-                // Styling
+
                 if (data.isHeadshot) {
-                    text.color.set(new hz.Color(1, 0, 0)); // Red
-                    this.entity.scale.set(new hz.Vec3(0.5, 0.5, 0.5)); // Smaller Headshot (was 0.7)
+                    text.color.set(new hz.Color(1, 0, 0));
+                    this.entity.scale.set(new hz.Vec3(0.5, 0.5, 0.5));
                 } else {
-                    text.color.set(new hz.Color(0, 1, 0)); // Green (was White)
-                    this.entity.scale.set(new hz.Vec3(0.25, 0.25, 0.25)); // Smaller Normal (was 0.4)
+                    text.color.set(new hz.Color(0, 1, 0));
+                    this.entity.scale.set(new hz.Vec3(0.25, 0.25, 0.25));
                 }
             }
         }
     } catch(e) {}
-    
-    // Schedule destruction
+
+    // Start float animation at 20 FPS — smooth enough for a 1.5s effect.
+    this.floatInterval = this.async.setInterval(this.onTick.bind(this), 50);
+
+    // Schedule deletion on server side.
     if (this.isServer()) {
-        this.async.setTimeout(() => {
+        this.destroyTimer = this.async.setTimeout(() => {
+            this.destroyTimer = null;
             try {
                 if (this.entity.isValidReference.get()) {
                     this.world.deleteAsset(this.entity);
@@ -88,29 +106,16 @@ class FloatingDamage extends hz.Component<typeof FloatingDamage> {
     }
   }
 
-  private onUpdate(data: { deltaTime: number }) {
-      if (!this.initialized) return;
+  private onTick(): void {
+    try {
+        if (!this.entity.isValidReference.get()) return;
 
-      try {
-          if (!this.entity.isValidReference.get()) return;
+        const progress = (Date.now() - this.startTime) / this.lifeTime;
+        if (progress >= 1.0) return;
 
-          const now = Date.now();
-          const progress = (now - this.startTime) / this.lifeTime;
-          
-          if (progress >= 1.0) return;
-
-
-
-          // 2. FLOAT UPWARDS
-          // Move up 1.5m over lifetime
-          const yOffset = progress * 1.5;
-          const currentPos = this.startPos.add(new hz.Vec3(0, yOffset, 0));
-          this.entity.position.set(currentPos);
-
-          // 3. FADE OUT (Not supported on all gizmos, skipping for reliability)
-          // If TextGizmo supports alpha, we could do:
-          // text.color.set(new hz.Color(r, g, b, 1.0 - progress));
-      } catch (e) {}
+        // Float upward 1.5m over lifetime.
+        this.entity.position.set(this.startPos.add(new hz.Vec3(0, progress * 1.5, 0)));
+    } catch (e) {}
   }
 }
 
