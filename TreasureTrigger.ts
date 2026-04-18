@@ -16,11 +16,20 @@ class TreasureTrigger extends Component<typeof TreasureTrigger>{
   private npc!: Npc;
   private npcPlayer!: NpcPlayer;
   private currentPhase?: NpcEngagementPhase;
+  // PERF FIX: Replaced World.onUpdate (60fps) with a 50ms interval (20fps) — chest animation.
+  private updateInterval: number | null = null;
+  private static readonly TICK_DT = 0.05;
 
   preStart() {
     this.npc = this.props.npc!.as(Npc);
     this.connectCodeBlockEvent(this.entity, CodeBlockEvents.OnPlayerEnterTrigger, this.OnPlayerEnterTrigger.bind(this));
-    this.connectLocalBroadcastEvent(World.onUpdate, (data: { deltaTime: number }) => this.onUpdate(data.deltaTime));
+  }
+
+  cleanup(): void {
+    if (this.updateInterval !== null) {
+      this.async.clearInterval(this.updateInterval);
+      this.updateInterval = null;
+    }
   }
 
   async start() {
@@ -28,7 +37,8 @@ class TreasureTrigger extends Component<typeof TreasureTrigger>{
     this.chestLid = this.props.chestLid;
   }
 
-  onUpdate(deltaTime: number) {
+  private onUpdate(): void {
+    const deltaTime = TreasureTrigger.TICK_DT;
     if (this.triggered && !this.opened) {
       this.elapsedTime += deltaTime;
       this.animateLid(0, -90, 0.5, true, 1);
@@ -58,6 +68,9 @@ class TreasureTrigger extends Component<typeof TreasureTrigger>{
 
   async OnPlayerEnterTrigger(player: Player) {
     this.triggered = true;
+    if (this.updateInterval === null) {
+      this.updateInterval = this.async.setInterval(() => this.onUpdate(), 50);
+    }
     const playerName = player.name.get();
     this.sendNetworkBroadcastEvent(targetedPlayerEvent, {player: player});
     await this.npc.conversation.addEventPerception(`${playerName} opened your treasure chest`);
@@ -68,6 +81,10 @@ class TreasureTrigger extends Component<typeof TreasureTrigger>{
 
 
   onLidClose() {
+    if (this.updateInterval !== null) {
+      this.async.clearInterval(this.updateInterval);
+      this.updateInterval = null;
+    }
     this.npc.conversation.addEventPerception("You closed the treasure chest");
     this.npc.conversation.setDynamicContext("treasure_status", "The treasure is safe");
   }

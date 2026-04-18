@@ -20,10 +20,14 @@ class SpinningLogo extends hz.Component<typeof SpinningLogo> {
 
   private startPos!: hz.Vec3;
   private timeOffset!: number;
-  
+
   // Runtime state
   private currentSpeed!: number;
   private isPaused!: boolean;
+  // PERF FIX: Replaced onPrePhysicsUpdate (60fps per instance) with a 33ms interval (~30fps).
+  private updateInterval: number | null = null;
+  private static readonly TICK_MS = 33;
+  private static readonly TICK_DT = SpinningLogo.TICK_MS / 1000;
 
   start() {
     this.startPos = this.entity.position.get();
@@ -31,27 +35,28 @@ class SpinningLogo extends hz.Component<typeof SpinningLogo> {
     this.currentSpeed = this.props.spinSpeed;
     this.isPaused = this.props.isPaused;
 
-    this.connectLocalBroadcastEvent(hz.World.onPrePhysicsUpdate, this.onUpdate.bind(this));
+    this.updateInterval = this.async.setInterval(() => this.tick(), SpinningLogo.TICK_MS);
   }
 
-  onUpdate(data: { deltaTime: number }) {
+  cleanup(): void {
+    if (this.updateInterval !== null) {
+      this.async.clearInterval(this.updateInterval);
+      this.updateInterval = null;
+    }
+  }
+
+  private tick(): void {
     if (this.isPaused) return;
 
-    // 1. Handle Spinning
     const currentRot = this.entity.rotation.get();
-    const spinRot = hz.Quaternion.fromAxisAngle(this.props.spinAxis, this.currentSpeed * data.deltaTime);
-    
+    const spinRot = hz.Quaternion.fromAxisAngle(this.props.spinAxis, this.currentSpeed * SpinningLogo.TICK_DT);
+
     if (this.props.useWorldAxis) {
-        // World Spin: Apply rotation BEFORE current rotation (Global Axis)
-        // This spins it around the vertical pole, regardless of how the object is tilted
-        this.entity.rotation.set(spinRot.mul(currentRot));
+      this.entity.rotation.set(spinRot.mul(currentRot));
     } else {
-        // Local Spin: Apply rotation AFTER current rotation (Local Axis)
-        // This spins it like a wheel attached to the object
-        this.entity.rotation.set(currentRot.mul(spinRot));
+      this.entity.rotation.set(currentRot.mul(spinRot));
     }
 
-    // 2. Handle Bobbing (Sine Wave)
     if (this.props.enableBobbing) {
       const time = (Date.now() / 1000) + this.timeOffset;
       const newY = this.startPos.y + Math.sin(time * this.props.bobSpeed) * this.props.bobHeight;

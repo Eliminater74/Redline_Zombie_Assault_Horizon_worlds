@@ -118,14 +118,6 @@ class WaveManager extends hz.Component<typeof WaveManager> {
   private isSpawning = false;
   /** Timestamp when current wave started (for duration tracking) */
   private waveStartTime: number = 0;
-  /** Set of zombies currently playing death animation (excluded from count) */
-  private dyingZombies = new Set<hz.Entity>();
-  /** How many more zombies need to spawn this wave */
-  private zombiesRemainingToSpawn: number = 0;
-  /** Total zombies for this wave (for HUD display) */
-  private waveTotalZombies: number = 0;
-  /** Timestamp (ms) when a spawn location was last used */
-  private spawnCooldowns: Map<string, number> = new Map();
 
   /** Ammo entities currently on the ground */
   private spawnedAmmo: hz.Entity[] = [];
@@ -227,7 +219,7 @@ class WaveManager extends hz.Component<typeof WaveManager> {
     let pending = 0;
     let remaining = 0;
     let dying = 0;
-    let total = this.waveTotalZombies;
+    let total = 0;
 
     if (this.spawner) {
       active = this.spawner.getActiveCount();
@@ -290,12 +282,9 @@ class WaveManager extends hz.Component<typeof WaveManager> {
     this.lastCountChangeTime = Date.now();
 
     // 1. START WAVE IN SPAWNER
-    this.zombiesRemainingToSpawn = wave * spawnIncrease;
-    this.waveTotalZombies = this.zombiesRemainingToSpawn;
-    this.isSpawning = true; // Still track 'isSpawning' locally for Win Condition logic? 
-    // Actually, spawner handles the spawning loop. We just need to know when it's done.
-    
-    this.spawner.startWave(this.zombiesRemainingToSpawn, health, speed, wave);
+    const totalZombies = wave * spawnIncrease;
+    this.isSpawning = true;
+    this.spawner.startWave(totalZombies, health, speed, wave);
   }
 
   /**
@@ -303,7 +292,6 @@ class WaveManager extends hz.Component<typeof WaveManager> {
    */
   clearControllers(): void {
      if (this.spawner) this.spawner.clearControllers();
-     this.dyingZombies.clear();
   }
 
   /**
