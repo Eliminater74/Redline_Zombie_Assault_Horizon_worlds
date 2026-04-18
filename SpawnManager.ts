@@ -39,6 +39,10 @@ export class SpawnManager {
   private isClearing = false;
   private pendingSpawnCount = 0;
   private killedZombiesCount = 0;
+  // BUG FIX: Generation counter — incremented on every clearControllers()/startWave() so that
+  // delayed death-cleanup timers from the previous wave silently discard themselves instead of
+  // calling unload() on already-disposed SpawnControllers.
+  private waveGeneration = 0;
   // HORIZON BUG WORKAROUND: Timer/Interval race conditions after destroy — use number, not any.
   private spawnRetryTimer: number | null = null;
 
@@ -122,6 +126,8 @@ export class SpawnManager {
   }
 
   public clearControllers(): void {
+      // Advance generation so any in-flight death timers discard themselves.
+      this.waveGeneration++;
       this.stopWatchdog();
       this.clearSpawnRetry();
       if (this.controllers) {
@@ -393,14 +399,19 @@ export class SpawnManager {
         this.dyingZombies.add(zombie);
         this.notifyUpdate();
 
+        // BUG FIX: Capture current generation so these timers self-discard after a
+        // clearControllers() call. Without this, they call unload() on disposed controllers.
+        const gen = this.waveGeneration;
         this.async.setTimeout(() => {
-            controller.unload(); 
+            if (this.waveGeneration !== gen) return;
+            controller.unload();
             this.async.setTimeout(() => {
-                 this.dyingZombies.delete(zombie);
-                 this.killedZombiesCount++; 
-                 this.notifyUpdate(); 
-                 this.checkAndRecycle(controller);
-            }, 1000); 
+                if (this.waveGeneration !== gen) return;
+                this.dyingZombies.delete(zombie);
+                this.killedZombiesCount++;
+                this.notifyUpdate();
+                this.checkAndRecycle(controller, gen);
+            }, 1000);
         }, ZOMBIE_REMOVAL_DELAY * 1000);
       } else {
         console.warn("[SpawnManager] Zombie death received with no controller match; issuing replacement.");
@@ -409,10 +420,12 @@ export class SpawnManager {
       }
   }
 
-  private checkAndRecycle(sc: hz.SpawnController): void {
+  // BUG FIX: gen parameter lets us bail out if the wave was reset mid-recycle loop.
+  private checkAndRecycle(sc: hz.SpawnController, gen: number): void {
+      if (this.waveGeneration !== gen) return;
       const state = sc.currentState.get();
       if (state === hz.SpawnState.Active || state === hz.SpawnState.Loading || state === hz.SpawnState.Unloading) {
-          this.async.setTimeout(() => this.checkAndRecycle(sc), 100);
+          this.async.setTimeout(() => this.checkAndRecycle(sc, gen), 100);
           return;
       }
       this.reservedControllers.delete(sc);

@@ -68,13 +68,13 @@ class Portal_Entity extends Component<typeof Portal_Entity> {
         if (!this.hasAlreadyPlayedFX) {
           this.hasAlreadyPlayedFX = true;
 
-          this.props.teleportSFX?.as(AudioGizmo).position.set(player.position.get());
-          this.props.teleportVFX?.as(ParticleGizmo).position.set(player.position.get());
+          this.props.teleportSFX?.as(AudioGizmo)?.position.set(player.position.get());
+          this.props.teleportVFX?.as(ParticleGizmo)?.position.set(player.position.get());
 
           // HORIZON BUG WORKAROUND: Audio double-play — always stop before play on AudioGizmo.
           const teleportAudio = this.props.teleportSFX?.as(AudioGizmo);
           if (teleportAudio) { teleportAudio.stop(); teleportAudio.play(); }
-          this.props.teleportVFX?.as(ParticleGizmo).play();
+          this.props.teleportVFX?.as(ParticleGizmo)?.play();
 
           this.teleportNearbyPlayer(player);
         }
@@ -117,7 +117,7 @@ class Portal_Entity extends Component<typeof Portal_Entity> {
       randomSpawnPoint.teleportPlayer(player);
     }
     else {
-      this.props.nonRandomDefaultSpawnPoint?.as(SpawnPointGizmo).teleportPlayer(player);
+      this.props.nonRandomDefaultSpawnPoint?.as(SpawnPointGizmo)?.teleportPlayer(player);
     }
   }
 
@@ -131,8 +131,8 @@ class Portal_Entity extends Component<typeof Portal_Entity> {
 
     this.setVisibleState(false);
 
-    this.props.openPortalSFX?.as(AudioGizmo).stop({ fade: 1 });
-    this.props.openPortalVFX?.as(ParticleGizmo).stop();
+    this.props.openPortalSFX?.as(AudioGizmo)?.stop({ fade: 1 });
+    this.props.openPortalVFX?.as(ParticleGizmo)?.stop();
   }
 
   setVisibleState(isOn: boolean) {

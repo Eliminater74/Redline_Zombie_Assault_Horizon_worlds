@@ -31,6 +31,7 @@ class MovingPlatform extends hz.Component<typeof MovingPlatform> {
   private currentTargetIndex = 0;
   private isPaused = false;
   private updateInterval: number | null = null;
+  private pauseTimer: number | null = null;
   private startPos: hz.Vec3 = hz.Vec3.zero;
   private targetPos: hz.Vec3 | null = null; // Fix: Allow null for safety check
 
@@ -104,9 +105,12 @@ class MovingPlatform extends hz.Component<typeof MovingPlatform> {
 
   startPause() {
     this.isPaused = true;
-    this.async.setTimeout(() => {
+    // BUG FIX: Store handle so cleanup() can cancel an in-flight pause timer.
+    if (this.pauseTimer !== null) this.async.clearTimeout(this.pauseTimer);
+    this.pauseTimer = this.async.setTimeout(() => {
+        this.pauseTimer = null;
         this.isPaused = false;
-        
+
         if (this.waypoints.length > 0) {
             this.currentTargetIndex = (this.currentTargetIndex + 1) % this.waypoints.length;
             this.targetPos = this.waypoints[this.currentTargetIndex];
@@ -143,10 +147,17 @@ class MovingPlatform extends hz.Component<typeof MovingPlatform> {
     // Let's stick to X/Z plane wandering for safety unless requested.
   }
 
-  dispose() {
-      if (this.updateInterval) {
-          this.async.clearInterval(this.updateInterval);
-      }
+  // BUG FIX: Was named dispose() — Horizon calls cleanup(), not dispose().
+  // The 50ms update interval was running forever because dispose() was never invoked.
+  cleanup() {
+    if (this.updateInterval !== null) {
+      this.async.clearInterval(this.updateInterval);
+      this.updateInterval = null;
+    }
+    if (this.pauseTimer !== null) {
+      this.async.clearTimeout(this.pauseTimer);
+      this.pauseTimer = null;
+    }
   }
 }
 

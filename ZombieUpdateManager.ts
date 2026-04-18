@@ -134,6 +134,13 @@ class ZombieUpdateManager extends hz.Component<typeof ZombieUpdateManager> {
         console.log("[ZombieUpdateManager] Initialized - Centralized update loop active.");
     }
 
+    // BUG FIX: Without cleanup(), isInitialized stays true across script reloads,
+    // preventing the new instance from connecting its update loop and silently killing all zombie AI.
+    cleanup(): void {
+        isInitialized = false;
+        zombieRegistry.clear();
+    }
+
     // =========================================================================
     // FRAME UPDATE LOOP
     // =========================================================================

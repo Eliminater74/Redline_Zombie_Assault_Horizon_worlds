@@ -45,6 +45,7 @@ class ThemeMusicManager extends hz.Component<typeof ThemeMusicManager> {
   private activeSongs: hz.Entity[] = [];
   private isMusicPlaying = false;
   private watchdogTimer: number | null = null;
+  private errorRecoveryTimer: number | null = null;
   private listenersConnected = false;
 
   start() {
@@ -99,6 +100,10 @@ class ThemeMusicManager extends hz.Component<typeof ThemeMusicManager> {
   // HORIZON BUG WORKAROUND: Timer/Interval race conditions after destroy — cancel all timers in cleanup().
   cleanup(): void {
     this.clearWatchdog();
+    if (this.errorRecoveryTimer !== null) {
+      this.async.clearTimeout(this.errorRecoveryTimer);
+      this.errorRecoveryTimer = null;
+    }
     if (this.currentGizmo) {
       try { this.currentGizmo.stop(); } catch (e) { /* ignore */ }
       this.currentGizmo = null;
@@ -203,8 +208,12 @@ class ThemeMusicManager extends hz.Component<typeof ThemeMusicManager> {
         this.currentGizmo = null;
         this.currentEntityId = null;
         
-        // Retry immediately with a different song
-        this.async.setTimeout(() => this.playRandomSong(), 100); 
+        // BUG FIX: Store handle so cleanup() can cancel if component is destroyed during the 100ms window.
+        if (this.errorRecoveryTimer !== null) this.async.clearTimeout(this.errorRecoveryTimer);
+        this.errorRecoveryTimer = this.async.setTimeout(() => {
+          this.errorRecoveryTimer = null;
+          this.playRandomSong();
+        }, 100);
         return;
     }
 

@@ -236,8 +236,10 @@ class WeaponManager extends hz.Component<typeof WeaponManager> {
         const currentAttempts = this.spawnAttempts.get(player.id) || 0;
         if (currentAttempts < this.MAX_SPAWN_ATTEMPTS && player.isValidReference.get()) {
           this.async.setTimeout(() => {
+            // BUG FIX: Re-check at fire time — player may have left during the 500ms window.
+            if (!player.isValidReference.get()) return;
             this.spawnWeaponsForPlayer(player);
-          }, 500); // 500ms retry delay
+          }, 500);
         }
       });
   }
