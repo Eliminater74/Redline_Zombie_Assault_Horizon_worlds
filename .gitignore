@@ -1,0 +1,8 @@
+.backups/
+.operations.log
+.backups
+.claude
+.sixth
+.vscode
+node_modules
+types

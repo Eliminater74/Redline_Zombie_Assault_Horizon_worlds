@@ -1,0 +1,496 @@
+import * as hz from 'horizon/core';
+import { Events } from 'Events';
+import { spawnLocations } from 'ZombieSpawnPoint';
+
+/**
+ * SPAWN MANAGER
+ * Handles zombie pooling, spawning logic (LRU), and recycling.
+ * Decoupled from WaveManager to reduce complexity.
+ */
+
+// POOL CONFIG
+const MAX_CONCURRENT_ZOMBIES = 15;
+const ZOMBIE_REMOVAL_DELAY = 2.5; // Seconds
+const SPAWN_STAGGER_MS = 150;
+const SPAWN_POINT_COOLDOWN_MS = 350;
+const JANITOR_STUCK_MS = 150000;
+
+export class SpawnManager {
+  // CONFIG
+  private world: hz.World;
+  private component: hz.Component<any>;
+  private async: any;
+  private props: any; // Reference to WaveManager props (for assets)
+
+  // STATE
+  private controllers: hz.SpawnController[] = [];
+  private controllerTimestamps: Map<hz.SpawnController, number> = new Map();
+  private reservedControllers = new Set<hz.SpawnController>();
+  private zombieToController = new Map<bigint, hz.SpawnController>();
+  private spawnCooldowns: Map<string, number> = new Map();
+  private dyingZombies = new Set<hz.Entity>();
+  
+  // WAVE STATE
+  public zombiesRemainingToSpawn = 0;
+  public waveTotalZombies = 0;
+  private currentHealth = 100;
+  private currentSpeed = 1.0;
+  private currentWave = 1;
+  private isClearing = false;
+  private pendingSpawnCount = 0;
+  private killedZombiesCount = 0;
+  // HORIZON BUG WORKAROUND: Timer/Interval race conditions after destroy — use number, not any.
+  private spawnRetryTimer: number | null = null;
+
+  constructor(world: hz.World, component: hz.Component<any>, async: any, props: any) {
+    this.world = world;
+    this.component = component;
+    this.async = async;
+    this.props = props;
+  }
+
+  /**
+   * Initializes the zombie pool for a new wave.
+   */
+  public startWave(totalZombies: number, health: number, speed: number, waveNum: number): void {
+     this.currentHealth = health;
+     this.currentSpeed = speed;
+     this.currentWave = waveNum;
+     
+      this.zombiesRemainingToSpawn = totalZombies;
+      this.waveTotalZombies = totalZombies;
+      this.pendingSpawnCount = 0;
+      this.killedZombiesCount = 0;
+      this.zombieToController.clear();
+      this.reservedControllers.clear();
+      this.clearSpawnRetry();
+     
+     // Re-use or fill pool up to Max (Avoids destroying assets every wave)
+     const targetPoolSize = Math.min(totalZombies, MAX_CONCURRENT_ZOMBIES);
+     
+     // 1. Unload all active controllers to prepare for fresh stats
+     this.controllers.forEach(sc => {
+         const s = sc.currentState.get();
+         if (
+             s === hz.SpawnState.Active ||
+             s === hz.SpawnState.Loading ||
+             s === hz.SpawnState.Paused ||
+             (s === hz.SpawnState.Loaded && (sc.rootEntities.get()?.length ?? 0) > 0)
+         ) {
+              sc.unload();
+         }
+         this.controllerTimestamps.delete(sc);
+     });
+
+     // 2. Expand pool if needed
+     while (this.controllers.length < targetPoolSize) {
+        // Dynamic spawn selection
+        const variants: hz.Asset[] = [];
+        if (this.props.maleZombie) variants.push(this.props.maleZombie);
+        if (this.props.femaleZombie) variants.push(this.props.femaleZombie);
+        if (this.props.skeletonZombie) variants.push(this.props.skeletonZombie);
+        if (this.props.lichZombie) variants.push(this.props.lichZombie);
+        if (this.props.henchmanZombie) variants.push(this.props.henchmanZombie);
+
+        let prefab = this.props.maleZombie; 
+        if (variants.length > 0) {
+            prefab = variants[Math.floor(Math.random() * variants.length)];
+        }
+        
+        if (!prefab) {
+            console.error("[SpawnManager] ERROR: No zombie assets assigned in WaveManager props!");
+            break;
+        }
+
+        const sc = new hz.SpawnController(prefab, new hz.Vec3(0, -1500, 0), hz.Quaternion.one, hz.Vec3.one);
+        this.controllers.push(sc);
+    }
+
+    // Kickstart
+    this.spawnNextBatch();
+    this.startWatchdog(); 
+  }
+
+  /**
+   * Called when a zombie dies by accident (stuck/suicide).
+   * Adds +1 to the spawn pool so it gets replaced.
+   */
+  public refundZombie(): void {
+      this.zombiesRemainingToSpawn++;
+      // We don't call spawnNextBatch immediately here; 
+      // handleZombieDeath will call checkAndRecycle -> spawnNextBatch
+  }
+
+  public clearControllers(): void {
+      this.stopWatchdog();
+      this.clearSpawnRetry();
+      if (this.controllers) {
+           this.controllers.forEach(sc => sc.dispose());
+      }
+      this.controllers = [];
+      this.dyingZombies.clear();
+      this.reservedControllers.clear();
+      this.zombieToController.clear();
+      this.controllerTimestamps.clear();
+      this.pendingSpawnCount = 0;
+  }
+
+  /**
+   * Forces all zombies to unload immediately.
+   * Used for Game Reset / Wave Skip.
+   */
+  public forceKillAll(): void {
+      this.isClearing = true;
+      this.clearSpawnRetry();
+      if (this.controllers) {
+          this.controllers.forEach(sc => {
+              // Only unload active ones
+              const s = sc.currentState.get();
+              if (s === hz.SpawnState.Active || s === hz.SpawnState.Loading) {
+                  sc.unload();
+              }
+          });
+      }
+      // Reset counters immediately
+      this.dyingZombies.clear();
+      this.zombiesRemainingToSpawn = 0;
+      this.pendingSpawnCount = 0;
+      this.killedZombiesCount = 0;
+      this.reservedControllers.clear();
+      this.zombieToController.clear();
+      this.controllerTimestamps.clear();
+      this.isClearing = false;
+      this.notifyUpdate();
+  }
+
+  private clearSpawnRetry(): void {
+      if (this.spawnRetryTimer) {
+          this.async.clearTimeout(this.spawnRetryTimer);
+          this.spawnRetryTimer = null;
+      }
+  }
+
+  private scheduleSpawnRetry(delayMs: number = 1000): void {
+      if (this.spawnRetryTimer || this.isClearing) return;
+      this.spawnRetryTimer = this.async.setTimeout(() => {
+          this.spawnRetryTimer = null;
+          this.spawnNextBatch();
+      }, delayMs);
+  }
+
+  private getValidSpawnLocations(): hz.Entity[] {
+      return spawnLocations.filter((location) => {
+          try {
+              return !!location && location.isValidReference.get();
+          } catch {
+              return false;
+          }
+      });
+  }
+
+  private pickSpawnLocation(candidates: hz.Entity[]): hz.Entity {
+      const now = Date.now();
+
+      const cooled = candidates.filter((location) => {
+          const key = location.id.toString();
+          const last = this.spawnCooldowns.get(key) ?? 0;
+          return now - last >= SPAWN_POINT_COOLDOWN_MS;
+      });
+
+      const pool = cooled.length > 0 ? cooled : candidates;
+      const location = pool[Math.floor(Math.random() * pool.length)];
+      this.spawnCooldowns.set(location.id.toString(), now);
+      return location;
+  }
+
+  private canScheduleController(sc: hz.SpawnController): boolean {
+      if (this.reservedControllers.has(sc)) return false;
+      const state = sc.currentState.get();
+      if (state === hz.SpawnState.Unloaded) return true;
+      if (state !== hz.SpawnState.Loaded) return false;
+
+      const roots = sc.rootEntities.get();
+      return !roots || roots.length === 0;
+  }
+
+  /**
+   * Main Spawn Loop
+   */
+  public spawnNextBatch(): void {
+      if (this.isClearing || this.zombiesRemainingToSpawn <= 0) return;
+
+      const validSpawnLocations = this.getValidSpawnLocations();
+      if (validSpawnLocations.length === 0) {
+          this.scheduleSpawnRetry(1000);
+          return;
+      }
+
+      const availableWorkers = this.controllers.filter(sc => {
+          return this.canScheduleController(sc);
+      });
+
+      if (availableWorkers.length === 0 && this.zombiesRemainingToSpawn > 0) {
+          // Silent console log to avoid flooding during normal recycling
+          // console.log(`[SpawnManager] No available workers for ${this.zombiesRemainingToSpawn} zombies. Waiting for recycling...`);
+          this.scheduleSpawnRetry(250);
+          return;
+      }
+
+		// FIX: Throttled Staggered Spawning (Reduces engine pressure)
+		availableWorkers.forEach((sc, index) => {
+			this.reservedControllers.add(sc);
+			if (this.isClearing || this.zombiesRemainingToSpawn <= 0) return;
+
+			this.async.setTimeout(() => {
+				if (this.isClearing || this.zombiesRemainingToSpawn <= 0) {
+					this.reservedControllers.delete(sc);
+					return;
+				}
+				
+				this.zombiesRemainingToSpawn--;
+				this.pendingSpawnCount++;
+				this.controllerTimestamps.set(sc, Date.now());
+				this.notifyUpdate();
+
+				const timeoutId = this.async.setTimeout(() => {
+                    console.warn("[SpawnManager] Internal Spawn Timeout triggered (45s).");
+                }, 45000);
+
+				// spawn() already loads asset data when needed.
+				// Avoid load()->spawn double-step to reduce startup latency.
+				const spawnPromise = sc.spawn().catch(e => { throw e; });
+
+				spawnPromise.then(() => {
+						this.async.clearTimeout(timeoutId);
+						// RANDOM SPAWN LOGIC (User Request)
+						const candidates = this.getValidSpawnLocations();
+						if (candidates.length === 0) throw new Error("No Spawn Points");
+
+						// Pick location with basic cooldown to reduce spawn-point pileups
+						const location = this.pickSpawnLocation(candidates);
+
+						const roots = sc.rootEntities.get();
+						if (roots && roots.length > 0) {
+							const zombie = roots[0];
+							this.zombieToController.set(zombie.id, sc);
+								this.component.sendLocalEvent(location, Events.queueZombie, { 
+								zombie,
+								health: this.currentHealth,
+								speed: this.currentSpeed,
+								wave: this.currentWave
+							});
+						} else {
+							throw new Error("Spawned zombie has no root entity");
+						}
+						// Trigger update in WaveManager
+						this.pendingSpawnCount--;
+						this.controllerTimestamps.delete(sc);
+						this.reservedControllers.delete(sc);
+						this.notifyUpdate(); 
+				}).catch(e => {
+					this.async.clearTimeout(timeoutId);
+					console.error("[SpawnManager] Spawn Error: " + e);
+					sc.unload();
+					this.zombiesRemainingToSpawn++;
+					if (this.pendingSpawnCount > 0) this.pendingSpawnCount--;
+					this.controllerTimestamps.delete(sc);
+					this.reservedControllers.delete(sc);
+					this.async.setTimeout(() => {
+						this.notifyUpdate(); 
+						// REMOVED: Immediate retry. 
+                        // Slower-is-Faster: Let the 5s Watchdog handle it to avoid "thundering herd" choking the engine.
+					}, 1000);
+					this.scheduleSpawnRetry(1000);
+				});
+			}, index * SPAWN_STAGGER_MS);
+		});
+	}
+
+  // ============================================================================
+  // SAFETY WATCHDOG
+  // ============================================================================
+  // HORIZON BUG WORKAROUND: Timer/Interval race conditions after destroy — use number, not any.
+  private watchdogTimer: number | null = null;
+
+  public startWatchdog(): void {
+      if (this.watchdogTimer) this.async.clearInterval(this.watchdogTimer);
+      
+      console.log("[SpawnManager] Watchdog Started");
+      this.watchdogTimer = this.async.setInterval(() => {
+          const active = this.getActiveCount();
+          const inFlight = this.getInFlightCount();
+          const remaining = this.zombiesRemainingToSpawn;
+          const pending = this.pendingSpawnCount;
+          
+          // VERIFY TOTAL INTEGRITY (RECOVERY MODE)
+          // If the sum is lower than waveTotal, some zombies were "lost" (crashed/no refund)
+          const dying = this.dyingZombies.size;
+          const currentTotal = active + inFlight + remaining + pending + dying + this.killedZombiesCount;
+          if (currentTotal < this.waveTotalZombies && !this.isClearing) {
+              console.warn(`[SpawnManager] RECOVERY: Missing ${this.waveTotalZombies - currentTotal} zombies. Adjusting remaining pool.`);
+              this.zombiesRemainingToSpawn += (this.waveTotalZombies - currentTotal);
+              this.spawnNextBatch();
+              return;
+          }
+
+          // RECOVERY: If spawning is idle but zombies remain, retry spawning.
+          if (!this.isClearing && remaining > 0 && inFlight === 0 && pending === 0) {
+              this.spawnNextBatch();
+          }
+
+          // 3. CONCURRENCY JANITOR (Leak Prevention)
+          const now = Date.now();
+          this.controllers.forEach(sc => {
+              const state = sc.currentState.get();
+              const startTime = this.controllerTimestamps.get(sc);
+              
+              // JANITOR: If stuck in Loading for too long or Active without entity
+              if (startTime && (now - startTime > JANITOR_STUCK_MS)) {
+                  const roots = sc.rootEntities.get();
+                  const noRoots = !roots || roots.length === 0;
+                   
+                  if (state === hz.SpawnState.Loading || (state === hz.SpawnState.Active && noRoots)) {
+                      console.warn(`[SpawnManager] JANITOR: Reclaiming stuck controller (State: ${state}, NoRoots: ${noRoots})`);
+                      if (roots && roots.length > 0) {
+                          this.zombieToController.delete(roots[0].id);
+                      }
+                      sc.unload();
+                      // Clear state to let them be picked up in next rotation
+                      this.controllerTimestamps.delete(sc);
+                      this.reservedControllers.delete(sc);
+                       
+                      // Safety: Check if we need to decrement pending if it was stuck in loading
+                      if (state === hz.SpawnState.Loading && this.pendingSpawnCount > 0) {
+                          this.pendingSpawnCount--;
+                      }
+
+                      this.rebalanceAfterForcedRecycle();
+                  }
+              }
+          });
+      }, 5000); // Check every 5 seconds
+  }
+
+  public stopWatchdog(): void {
+      if (this.watchdogTimer) {
+          this.async.clearInterval(this.watchdogTimer);
+          this.watchdogTimer = null;
+      }
+  }
+
+  public handleZombieDeath(zombie: hz.Entity): void {
+      let sc = this.zombieToController.get(zombie.id);
+      if (!sc) {
+          sc = this.controllers.find(c => {
+              const roots = c.rootEntities.get();
+              return roots && roots.length > 0 && roots[0].id === zombie.id;
+          });
+      }
+
+      if (sc) {
+        const controller = sc;
+        this.zombieToController.delete(zombie.id);
+        this.dyingZombies.add(zombie);
+        this.notifyUpdate();
+
+        this.async.setTimeout(() => {
+            controller.unload(); 
+            this.async.setTimeout(() => {
+                 this.dyingZombies.delete(zombie);
+                 this.killedZombiesCount++; 
+                 this.notifyUpdate(); 
+                 this.checkAndRecycle(controller);
+            }, 1000); 
+        }, ZOMBIE_REMOVAL_DELAY * 1000);
+      } else {
+        console.warn("[SpawnManager] Zombie death received with no controller match; issuing replacement.");
+        this.zombiesRemainingToSpawn++;
+        this.rebalanceAfterForcedRecycle();
+      }
+  }
+
+  private checkAndRecycle(sc: hz.SpawnController): void {
+      const state = sc.currentState.get();
+      if (state === hz.SpawnState.Active || state === hz.SpawnState.Loading || state === hz.SpawnState.Unloading) {
+          this.async.setTimeout(() => this.checkAndRecycle(sc), 100);
+          return;
+      }
+      this.reservedControllers.delete(sc);
+      this.spawnNextBatch();
+  }
+
+  private notifyUpdate() {
+      if (this.isClearing) return;
+      // Callback to WaveManager to update UI / Check Win Condition
+      // We can iterate active controllers here to get the count
+      const activeCount = this.getActiveCount();
+      const inFlightCount = this.getInFlightCount();
+      // We actually need to communicate this back. 
+      // Option A: Callback function passed in constructor.
+      // Option B: Event.
+      // Let's use a callback set by WaveManager.
+      if (this.onUpdate) this.onUpdate(activeCount, this.controllers.length, this.waveTotalZombies, this.zombiesRemainingToSpawn, this.dyingZombies.size, inFlightCount, this.pendingSpawnCount, this.killedZombiesCount);
+  }
+  
+  public onUpdate: ((active: number, total: number, waveTotal: number, remaining: number, dying: number, inFlight: number, pending: number, killed: number) => void) | null = null;
+
+  public getActiveCount(): number {
+      return this.controllers.filter(sc => {
+          const state = sc.currentState.get();
+
+          // IMPORTANT: In Horizon, spawned entities can remain in Loaded state
+          // while still being alive/usable, so count both Loaded + Active (+Paused).
+          const liveState =
+              state === hz.SpawnState.Active ||
+              state === hz.SpawnState.Loaded ||
+              state === hz.SpawnState.Paused;
+          if (!liveState) return false;
+
+          const roots = sc.rootEntities.get();
+          if (!roots || roots.length === 0) return false;
+          if (this.dyingZombies.has(roots[0])) return false;
+          return true;
+      }).length;
+  }
+
+  public getInFlightCount(): number {
+      return this.controllers.filter(sc => {
+          const state = sc.currentState.get();
+          // ONLY trust the named enum for Loading state. 
+          // Avoid magic numbers that vary by Horizon runtime.
+          return state === hz.SpawnState.Loading;
+      }).length;
+  }
+
+  public getPendingCount(): number {
+      return this.pendingSpawnCount;
+  }
+
+  public getDyingCount(): number {
+      return this.dyingZombies.size;
+  }
+
+  public getKilledCount(): number {
+      return this.killedZombiesCount;
+  }
+
+  private rebalanceAfterForcedRecycle(): void {
+      const accounted =
+          this.getActiveCount() +
+          this.getInFlightCount() +
+          this.pendingSpawnCount +
+          this.zombiesRemainingToSpawn +
+          this.dyingZombies.size +
+          this.killedZombiesCount;
+
+      if (accounted < this.waveTotalZombies) {
+          this.zombiesRemainingToSpawn += (this.waveTotalZombies - accounted);
+      } else if (accounted > this.waveTotalZombies) {
+          const overflow = accounted - this.waveTotalZombies;
+          this.zombiesRemainingToSpawn = Math.max(0, this.zombiesRemainingToSpawn - overflow);
+      }
+
+      this.notifyUpdate();
+      this.spawnNextBatch();
+  }
+}
