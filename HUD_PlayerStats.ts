@@ -33,6 +33,12 @@ export class HUD_PlayerStats {
   levelUpText = new ui.Binding<string>('LEVEL UP!');
   levelUpScale = new ui.Binding<number>(1);
 
+  // BUG FIX: Store timer handles so dispose() can cancel them if the HUD is torn down mid-animation.
+  private xpScaleTimer: number | null = null;
+  private xpHideTimer: number | null = null;
+  private levelUpScaleTimer: number | null = null;
+  private levelUpHideTimer: number | null = null;
+
   constructor(private parent: any) {}
 
   /**
@@ -87,11 +93,15 @@ export class HUD_PlayerStats {
     this.xpPopupVisible.set(true, [player]);
     this.xpPopupScale.set(1.3, [player]);
 
-    this.parent.async.setTimeout(() => {
+    if (this.xpScaleTimer !== null) this.parent.async.clearTimeout(this.xpScaleTimer);
+    this.xpScaleTimer = this.parent.async.setTimeout(() => {
+      this.xpScaleTimer = null;
       this.xpPopupScale.set(1.0, [player]);
     }, 100);
 
-    this.parent.async.setTimeout(() => {
+    if (this.xpHideTimer !== null) this.parent.async.clearTimeout(this.xpHideTimer);
+    this.xpHideTimer = this.parent.async.setTimeout(() => {
+      this.xpHideTimer = null;
       this.xpPopupVisible.set(false, [player]);
     }, 1500);
   }
@@ -101,11 +111,15 @@ export class HUD_PlayerStats {
     this.levelUpVisible.set(true, [player]);
     this.levelUpScale.set(1.5, [player]);
 
-    this.parent.async.setTimeout(() => {
+    if (this.levelUpScaleTimer !== null) this.parent.async.clearTimeout(this.levelUpScaleTimer);
+    this.levelUpScaleTimer = this.parent.async.setTimeout(() => {
+      this.levelUpScaleTimer = null;
       this.levelUpScale.set(1.0, [player]);
     }, 200);
 
-    this.parent.async.setTimeout(() => {
+    if (this.levelUpHideTimer !== null) this.parent.async.clearTimeout(this.levelUpHideTimer);
+    this.levelUpHideTimer = this.parent.async.setTimeout(() => {
+      this.levelUpHideTimer = null;
       this.levelUpVisible.set(false, [player]);
     }, 3000);
   }
@@ -318,7 +332,11 @@ export class HUD_PlayerStats {
       });
   }
 
+  // HORIZON BUG WORKAROUND: Timer/Interval race conditions after destroy — cancel all timers in dispose().
   dispose() {
-      // Nothing specific to dispose locally
+    if (this.xpScaleTimer !== null) { this.parent.async.clearTimeout(this.xpScaleTimer); this.xpScaleTimer = null; }
+    if (this.xpHideTimer !== null) { this.parent.async.clearTimeout(this.xpHideTimer); this.xpHideTimer = null; }
+    if (this.levelUpScaleTimer !== null) { this.parent.async.clearTimeout(this.levelUpScaleTimer); this.levelUpScaleTimer = null; }
+    if (this.levelUpHideTimer !== null) { this.parent.async.clearTimeout(this.levelUpHideTimer); this.levelUpHideTimer = null; }
   }
 }

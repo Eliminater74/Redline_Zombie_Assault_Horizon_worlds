@@ -581,20 +581,21 @@ class WaveManager extends hz.Component<typeof WaveManager> {
     if (Math.random() < ammoChance && this.props.ammo) {
       const pos = zombie.position.get().add(hz.Vec3.up);
       const rot = hz.Quaternion.fromEuler(new hz.Vec3(90, 0, 90));
-      // Use SpawnController so the preloaded bundle cache is hit — load() is near-instant after preStart preload.
+      // Skip load() — spawn() handles loading internally and the preloader already warmed the
+      // bundle cache, so this is a single async step instead of two sequential round-trips.
+      // (Matching the pattern SpawnManager uses for zombies, which has no spawn delay.)
       const sc = new hz.SpawnController(this.props.ammo, pos, rot, hz.Vec3.one);
-      sc.load()
-        .then(() => sc.spawn())
+      sc.spawn()
         .then(() => {
           const entities = sc.rootEntities.get();
           if (!entities || entities.length === 0) {
-            console.warn("[WaveManager] spawnAsset returned no entities for ammo pickup.");
+            console.warn("[WaveManager] ammo spawn returned no entities.");
             return;
           }
           entities.forEach(e => { if (e) this.spawnedAmmo.push(e); });
         }).catch(e => {
-        console.error("[WaveManager] Failed to spawn ammo pickup:", e);
-      });
+          console.error("[WaveManager] Failed to spawn ammo pickup:", e);
+        });
     }
     
     // Hand off to Spawner

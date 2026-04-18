@@ -26,6 +26,17 @@ class AdminPortal extends hz.Component<typeof AdminPortal> {
     statusText: { type: hz.PropTypes.Entity },
   };
 
+  // BUG FIX: Store handle so rapid teleports don't stack multiple "ACCESS DENIED/GRANTED" clear timers.
+  private statusTimer: number | null = null;
+
+  // HORIZON BUG WORKAROUND: Timer/Interval race conditions after destroy — cancel timer in cleanup().
+  cleanup(): void {
+    if (this.statusTimer !== null) {
+      this.async.clearTimeout(this.statusTimer);
+      this.statusTimer = null;
+    }
+  }
+
   start() {
      // 1. Entry Logic (Strict)
      if (this.props.entryTrigger) {
@@ -112,7 +123,11 @@ class AdminPortal extends hz.Component<typeof AdminPortal> {
           const text = this.props.statusText.as(hz.TextGizmo);
           if (text) {
               text.text.set(msg);
-              this.async.setTimeout(() => text.text.set(""), 2000);
+              if (this.statusTimer !== null) this.async.clearTimeout(this.statusTimer);
+              this.statusTimer = this.async.setTimeout(() => {
+                this.statusTimer = null;
+                text.text.set("");
+              }, 2000);
           }
       }
   }

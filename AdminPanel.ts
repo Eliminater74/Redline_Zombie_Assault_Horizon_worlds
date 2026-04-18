@@ -36,7 +36,18 @@ class AdminPanel extends hz.Component<typeof AdminPanel> {
   private get HEADSHOTS_KEY() { return GameConfig.HEADSHOTS_KEY; }
   private get WAVE_KEY() { return GameConfig.WAVE_KEY; }
 
+  // BUG FIX: Store handle so rapid button presses cancel the previous status timer instead of stacking.
+  private statusTimer: number | null = null;
+
   start(): void {}
+
+  // HORIZON BUG WORKAROUND: Timer/Interval race conditions after destroy — cancel timer in cleanup().
+  cleanup(): void {
+    if (this.statusTimer !== null) {
+      this.async.clearTimeout(this.statusTimer);
+      this.statusTimer = null;
+    }
+  }
 
   preStart(): void {
     // Connect all triggers
@@ -74,7 +85,12 @@ class AdminPanel extends hz.Component<typeof AdminPanel> {
     const display = this.props.statusDisplay?.as(hz.TextGizmo);
     if (display) {
       display.text.set(msg);
-      this.async.setTimeout(() => display.text.set(""), 3000);
+      // Cancel any previous clear timer before scheduling a new one.
+      if (this.statusTimer !== null) this.async.clearTimeout(this.statusTimer);
+      this.statusTimer = this.async.setTimeout(() => {
+        this.statusTimer = null;
+        display.text.set("");
+      }, 3000);
     }
   }
 

@@ -8,7 +8,7 @@
 - **AmmoBox.ts** — Replaced `World.onUpdate` (60 FPS per instance) with `setInterval(50ms)`. With 60 boxes active this eliminated ~3,600 redundant calls/sec.
 - **FloatingDamage.ts** — Replaced `World.onUpdate` with `setInterval(50ms)`. Float animation now only starts after `initFloatingDamage` event fires, eliminating idle overhead.
 - **PirateTrigger.ts** — Replaced `World.onUpdate` with `setInterval(100ms)` started after `npcPlayer` resolves. NPC look-at doesn't need frame accuracy.
-- **WaveManager.ts** — Ammo pickup spawns are now near-instant. A `SpawnController` preloads the ammo bundle at game start, warming Horizon's asset cache so each per-drop spawn hits the cache instead of loading fresh (was 1–3 second delay).
+- **WaveManager.ts** — Eliminated ammo box spawn delay. Root cause: per-drop code was calling `sc.load().then(() => sc.spawn())` — two sequential async round-trips to Horizon's runtime. Fixed by calling `sc.spawn()` directly (matching the pattern SpawnManager uses for zombies), with the preloader still warming the bundle cache at game start for the first drop.
 
 ### Bug Fixes
 - **SpawnManager.ts** — `dyingZombies` Set used JS object reference equality (`Set.has()`). Entity wrappers from `rootEntities.get()` and `Events.zombieDeath` are different JS objects for the same entity, so `has()` always returned `false`. Dead zombies were never excluded from `getActiveCount()` — the HUD zombie count didn't drop until 3.5 seconds after each kill. Fixed by adding `dyingZombieIds: Set<bigint>` and comparing by entity ID.
