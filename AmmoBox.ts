@@ -4,15 +4,19 @@ import { Events } from 'Events';
 class AmmoBox extends hz.Component<typeof AmmoBox> {
   static propsDefinition = {
     trigger: { type: hz.PropTypes.Entity },
-    pickupSFX: { type: hz.PropTypes.Entity }, 
+    pickupSFX: { type: hz.PropTypes.Entity },
   };
 
   private waveCount = 0;
   private isCollected = false;
   private isDespawning = false;
-  private lastDistanceCheck = 0; // Throttle distance checks
-  private spawnTime = 0;
-  private isKinematic = false;
+  private lastDistanceCheck = 0;
+
+  // PERF FIX: Replaced World.onUpdate (60 FPS per instance) with a 50ms setInterval.
+  // With 60 ammo boxes on the ground, onUpdate was firing 3600 times/sec just for rotation.
+  private updateInterval: number | null = null;
+  // One-shot timer to freeze physics after 3s (no need to check every frame).
+  private kinematicTimer: number | null = null;
 
   private isServer(): boolean {
     try {
@@ -34,16 +38,35 @@ class AmmoBox extends hz.Component<typeof AmmoBox> {
     // 2. Game Logic
     this.connectNetworkBroadcastEvent(Events.endGame, this.despawn.bind(this));
     this.connectLocalBroadcastEvent(Events.newWave, this.onNewWave.bind(this));
-    this.connectNetworkBroadcastEvent(Events.despawnAmmo, this.onDespawnRequest.bind(this)); // FIX: Listen for cleanup requests
-    this.connectNetworkBroadcastEvent(Events.forceCleanupAmmo, this.onForceCleanup.bind(this)); // FIX: Wave-start purge
+    this.connectNetworkBroadcastEvent(Events.despawnAmmo, this.onDespawnRequest.bind(this));
+    this.connectNetworkBroadcastEvent(Events.forceCleanupAmmo, this.onForceCleanup.bind(this));
 
-    // 3. Animation Logic (Fixed for your API version)
-    // We use the Global World Broadcast for updates, not CodeBlockEvents
-    this.connectLocalBroadcastEvent(
-      hz.World.onUpdate, 
-      this.onUpdate.bind(this)
-    );
-    this.spawnTime = Date.now();
+    // 3. Animation + proximity at 20 FPS (50ms) instead of 60 FPS per instance.
+    this.updateInterval = this.async.setInterval(this.onTick.bind(this), 50);
+
+    // 4. Freeze physics after 3 seconds to stop the engine solving collisions for idle boxes.
+    this.kinematicTimer = this.async.setTimeout(() => {
+      this.kinematicTimer = null;
+      if (this.isCollected) return;
+      try {
+        if (this.entity.isValidReference.get()) {
+          const body = this.entity as any;
+          if (body.isKinematic) body.isKinematic.set(true);
+        }
+      } catch (e) {}
+    }, 3000);
+  }
+
+  // HORIZON BUG WORKAROUND: Timer/Interval race conditions after destroy — cancel all timers in cleanup().
+  cleanup(): void {
+    if (this.updateInterval !== null) {
+      this.async.clearInterval(this.updateInterval);
+      this.updateInterval = null;
+    }
+    if (this.kinematicTimer !== null) {
+      this.async.clearTimeout(this.kinematicTimer);
+      this.kinematicTimer = null;
+    }
   }
 
   private onNewWave(_data: { wave: number }): void {
@@ -58,15 +81,12 @@ class AmmoBox extends hz.Component<typeof AmmoBox> {
 
     this.sendNetworkEvent(player, Events.giveAmmo, {});
 
-    // CLIENT: Instant feedback (hide and silent)
     try {
         if (this.entity.isValidReference.get()) {
             this.entity.visible.set(false);
         }
     } catch (e) { /* Entity already deleted */ }
 
-    // Disable collision to prevent re-trigger
-    // FIX: Validate trigger entity before accessing collidable
     try {
         if (this.props.trigger && this.props.trigger.isValidReference.get()) {
            this.props.trigger.collidable.set(false);
@@ -84,7 +104,6 @@ class AmmoBox extends hz.Component<typeof AmmoBox> {
         }
     } catch (e) { /* Audio entity invalid */ }
 
-    // SERVER: Request actual deletion
     try {
         this.sendNetworkBroadcastEvent(Events.despawnAmmo, { id: this.entity.id.toString() });
     } catch (e) { /* Entity invalid */ }
@@ -92,7 +111,6 @@ class AmmoBox extends hz.Component<typeof AmmoBox> {
 
   private onDespawnRequest(data: { id: string }): void {
     if (!this.isServer()) return;
-    // FIX: Validate entity before accessing ID
     try {
         if (!this.entity.isValidReference.get()) return;
         if (data.id === this.entity.id.toString()) {
@@ -128,18 +146,11 @@ class AmmoBox extends hz.Component<typeof AmmoBox> {
     } catch (e) { /* Entity already deleted */ }
   }
 
-  /**
-   * Force cleanup handler - called at wave start to purge invisible/collected ammo.
-   * Each ammo box checks itself and requests deletion if it should be removed.
-   */
-  private onForceCleanup(data: { keepCount: number }): void {
-    // If already collected/invisible, delete self
+  private onForceCleanup(_data: { keepCount: number }): void {
     if (this.isCollected) {
         this.despawn();
         return;
     }
-
-    // If we're invisible but not marked collected (edge case), delete
     try {
         if (!this.entity.visible.get()) {
             this.isCollected = true;
@@ -148,47 +159,21 @@ class AmmoBox extends hz.Component<typeof AmmoBox> {
     } catch (e) { /* Entity invalid */ }
   }
 
-  private onUpdate(data: { deltaTime: number }): void {
-    // FIX: Skip update if entity was already collected/deleted
+  private onTick(): void {
     if (this.isCollected) return;
 
-    // FIX: Validate entity is still valid before accessing properties
     try {
         if (!this.entity.isValidReference.get()) return;
     } catch (e) { return; }
 
-    const rotationSpeed = data.deltaTime * Math.PI;
-    const currentRot = this.entity.rotation.get();
-
-    // Rotate around UP axis
-    // Rotate around UP axis
+    // Rotate (50ms interval = 0.05s delta equivalent)
     try {
-        const rotChange = hz.Quaternion.fromAxisAngle(hz.Vec3.up, rotationSpeed);
-        this.entity.rotation.set(currentRot.mul(rotChange));
-    } catch (e) { 
-        // Entity is Static; stop trying to animate it
-    }
+        const rotChange = hz.Quaternion.fromAxisAngle(hz.Vec3.up, 0.05 * Math.PI);
+        this.entity.rotation.set(this.entity.rotation.get().mul(rotChange));
+    } catch (e) { /* Entity is Static — stop rotating */ }
 
-    // RELIABILITY FIX: Manual Distance Check (THROTTLED for performance)
-    // Only check every 200ms
+    // Proximity pickup check throttled to every 200ms (every 4 ticks)
     const now = Date.now();
-    
-    // PHYSICS OPTIMIZATION: Sleep after 3 seconds
-    // If not already kinematic, and 3s have passed since spawn, make it kinematic
-    // This stops the physics engine from solving collisions for thousands of stationary boxes.
-    if (!this.isCollected && !this.isKinematic && now > this.spawnTime + 3000) {
-        this.isKinematic = true;
-        try {
-            if (this.entity.isValidReference.get()) {
-                 // Horizon API uses 'as(hz.PhysicsGizmo)' or direct property access depending on version.
-                 // Assuming standard entity physics properties here if Gizmo fails.
-                 // If PhysicsGizmo is not exported, we use 'any' cast as fallback to access isKinematic.
-                 const body = this.entity as any; 
-                 if (body.isKinematic) body.isKinematic.set(true);
-            }
-        } catch (e) {}
-    }
-
     if (now - this.lastDistanceCheck < 200) return;
     this.lastDistanceCheck = now;
 
@@ -197,16 +182,14 @@ class AmmoBox extends hz.Component<typeof AmmoBox> {
         if (player) {
           const posA = player.position.get();
           const posB = this.entity.position.get();
-          // Fast distance check (avoid sqrt)
           const dx = posA.x - posB.x;
           const dy = posA.y - posB.y;
           const dz = posA.z - posB.z;
-
-          if ((dx*dx + dy*dy + dz*dz) < 2.25) { // 1.5m radius
+          if ((dx*dx + dy*dy + dz*dz) < 2.25) {
              this.onPlayerEnter(player);
           }
         }
-    } catch(e) {} // Ignore player not found errors
+    } catch(e) {}
   }
 }
 
