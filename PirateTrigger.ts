@@ -15,6 +15,12 @@ class PirateTrigger extends hz.Component<typeof PirateTrigger> {
   private greetedPlayers: hz.Player[] = [];
   private overrideTarget: boolean = false;
 
+  // PERF FIX: Replaced World.onUpdate (60 FPS) with 100ms interval — NPC look-at doesn't need frame accuracy.
+  private updateInterval: number | null = null;
+  // BUG FIX: Track both removeTarget timers so rapid re-calls don't stack duplicate timers.
+  private lookAtTimer: number | null = null;
+  private clearLookTimer: number | null = null;
+
   preStart(): void {
     this.npc = this.props.npc!.as(Npc);
 
@@ -26,8 +32,6 @@ class PirateTrigger extends hz.Component<typeof PirateTrigger> {
       this.onPlayerExited(player);
     });
 
-    this.connectLocalBroadcastEvent(hz.World.onUpdate, data => this.onUpdate(data.deltaTime));
-
     this.connectNetworkEvent(this.npc!, NpcEvents.OnNpcStoppedSpeaking, () => {
       this.removeTarget();
     });
@@ -37,15 +41,31 @@ class PirateTrigger extends hz.Component<typeof PirateTrigger> {
     });
   }
 
+  // HORIZON BUG WORKAROUND: Timer/Interval race conditions after destroy — cancel all timers in cleanup().
+  cleanup(): void {
+    if (this.updateInterval !== null) {
+      this.async.clearInterval(this.updateInterval);
+      this.updateInterval = null;
+    }
+    if (this.lookAtTimer !== null) {
+      this.async.clearTimeout(this.lookAtTimer);
+      this.lookAtTimer = null;
+    }
+    if (this.clearLookTimer !== null) {
+      this.async.clearTimeout(this.clearLookTimer);
+      this.clearLookTimer = null;
+    }
+  }
+
   async start() {
     this.npcPlayer = (await this.npc.tryGetPlayer())!;
     this.defaultTargetPosition = this.npcPlayer.head.position.get().add(this.npcPlayer.head.forward.get());
-  }
-
-  onUpdate(deltaTime: number) {
-    if (this.overrideTarget) {
-      this.setTargetPosition();
-    }
+    // Start after npcPlayer is ready so the tick can safely access it.
+    this.updateInterval = this.async.setInterval(() => {
+      if (this.overrideTarget && this.npcPlayer) {
+        this.setTargetPosition();
+      }
+    }, 100);
   }
 
   setTarget(target:hz.Player) {
@@ -101,10 +121,15 @@ class PirateTrigger extends hz.Component<typeof PirateTrigger> {
 
   removeTarget() {
     this.overrideTarget = false;
-    this.async.setTimeout(() => {
+    // Cancel any in-flight timers from a previous removeTarget() call.
+    if (this.lookAtTimer !== null) { this.async.clearTimeout(this.lookAtTimer); }
+    if (this.clearLookTimer !== null) { this.async.clearTimeout(this.clearLookTimer); }
+    this.lookAtTimer = this.async.setTimeout(() => {
+      this.lookAtTimer = null;
       this.npcPlayer.setLookAtTarget(this.defaultTargetPosition);
     }, 1000);
-    this.async.setTimeout(() => {
+    this.clearLookTimer = this.async.setTimeout(() => {
+      this.clearLookTimer = null;
       this.npcPlayer.clearLookAtTarget();
     }, 2000);
   }
