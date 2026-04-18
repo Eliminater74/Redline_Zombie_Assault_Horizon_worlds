@@ -27,6 +27,10 @@ export class VisitorLeaderboard extends Component<typeof VisitorLeaderboard> {
   // Use static to share state across multiple instances of this script
   private static processedPlayers = new Set<number>();
 
+  // BUG FIX: Track per-player timer handles so we can cancel them if the player exits
+  // before the 2s data-load delay fires. Previously the timer always fired and just logged a warning.
+  private pendingTimers = new Map<number, number>();
+
   start() {
     this.connectCodeBlockEvent(
       this.entity,
@@ -53,14 +57,28 @@ export class VisitorLeaderboard extends Component<typeof VisitorLeaderboard> {
     if (VisitorLeaderboard.processedPlayers.has(player.id)) return;
     VisitorLeaderboard.processedPlayers.add(player.id);
 
-    // Wait for data to load
-    this.async.setTimeout(() => {
+    // Wait for persistent storage to load before reading visit count.
+    const timer = this.async.setTimeout(() => {
+        this.pendingTimers.delete(player.id);
         this.processVisit(player);
     }, 2000);
+    this.pendingTimers.set(player.id, timer);
   }
 
   private onPlayerExit(player: Player) {
+    // Cancel the pending timer if the player leaves before the 2s window fires.
+    const timer = this.pendingTimers.get(player.id);
+    if (timer !== undefined) {
+      this.async.clearTimeout(timer);
+      this.pendingTimers.delete(player.id);
+    }
     VisitorLeaderboard.processedPlayers.delete(player.id);
+  }
+
+  // HORIZON BUG WORKAROUND: Timer/Interval race conditions after destroy — cancel all timers in cleanup().
+  cleanup(): void {
+    this.pendingTimers.forEach(timer => this.async.clearTimeout(timer));
+    this.pendingTimers.clear();
   }
 
   private processVisit(player: Player) {
