@@ -229,6 +229,31 @@ export class SpawnManager {
   }
 
   /**
+   * Creates the full zombie pool and begins loading all controllers.
+   * Call once at game-server start so wave-1 spawn() skips the load step entirely.
+   */
+  public preloadPool(targetSize: number = MAX_CONCURRENT_ZOMBIES): void {
+      while (this.controllers.length < targetSize) {
+          const variants: hz.Asset[] = [];
+          if (this.props.maleZombie) variants.push(this.props.maleZombie);
+          if (this.props.femaleZombie) variants.push(this.props.femaleZombie);
+          if (this.props.skeletonZombie) variants.push(this.props.skeletonZombie);
+          if (this.props.lichZombie) variants.push(this.props.lichZombie);
+          if (this.props.henchmanZombie) variants.push(this.props.henchmanZombie);
+
+          let prefab = this.props.maleZombie;
+          if (variants.length > 0) {
+              prefab = variants[Math.floor(Math.random() * variants.length)];
+          }
+          if (!prefab) break;
+
+          const sc = new hz.SpawnController(prefab, new hz.Vec3(0, -1500, 0), hz.Quaternion.one, hz.Vec3.one);
+          this.controllers.push(sc);
+      }
+      this.preloadForNextWave();
+  }
+
+  /**
    * Main Spawn Loop
    */
   public spawnNextBatch(): void {

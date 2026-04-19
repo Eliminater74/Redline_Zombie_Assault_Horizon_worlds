@@ -200,6 +200,9 @@ class WaveManager extends hz.Component<typeof WaveManager> {
     // Clean up any leftover controllers from previous session
     this.spawner.clearControllers();
 
+    // Pre-warm the zombie pool so wave-1 spawn() skips the load step entirely.
+    this.spawner.preloadPool();
+
     // Preload the ammo asset so the bundle is cached — eliminates the spawn delay on first zombie drop.
     if (this.props.ammo) {
       this.ammoPreloader = new hz.SpawnController(this.props.ammo, hz.Vec3.zero, hz.Quaternion.one, hz.Vec3.one);
@@ -583,7 +586,14 @@ class WaveManager extends hz.Component<typeof WaveManager> {
             console.warn("[WaveManager] ammo spawn returned no entities.");
             return;
           }
-          entities.forEach(e => { if (e) this.spawnedAmmo.push(e); });
+          entities.forEach(e => {
+            if (e) {
+              // Force visible immediately — prefab default is false, and AmmoBox.start()
+              // may not replicate fast enough to avoid a blank flash on clients.
+              try { e.visible.set(true); } catch {}
+              this.spawnedAmmo.push(e);
+            }
+          });
         }).catch(e => {
           console.error("[WaveManager] Failed to spawn ammo pickup:", e);
         });
