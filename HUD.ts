@@ -86,6 +86,10 @@ export class HUD extends ui.UIComponent<typeof HUD> {
   private playerList!: HUD_PlayerList;
   private playerStats!: HUD_PlayerStats;
 
+  // Clock
+  clockTime = new ui.Binding<string>('');
+  private clockInterval: number | null = null;
+
   // WAVE STATE (for headshot multiplier - Global is fine for Wave)
   private currentWave = 1;
   // HORIZON BUG WORKAROUND: Timer/Interval race conditions after destroy — store handle to cancel in dispose().
@@ -140,6 +144,12 @@ export class HUD extends ui.UIComponent<typeof HUD> {
     // This fixes edge cases where script reloads or players join before script is ready.
     const players = this.world.getPlayers();
     players.forEach(p => this.onPlayerJoin(p));
+
+    // Local clock — updates every second using the player's device time.
+    this.clockTime.set(new Date().toLocaleTimeString());
+    this.clockInterval = this.async.setInterval(() => {
+      this.clockTime.set(new Date().toLocaleTimeString());
+    }, 1000);
   }
 
   // ---------------------------------------------------------
@@ -147,6 +157,10 @@ export class HUD extends ui.UIComponent<typeof HUD> {
   // ---------------------------------------------------------
   dispose(): void {
     // HORIZON BUG WORKAROUND: Timer/Interval race conditions after destroy — cancel all timers in dispose().
+    if (this.clockInterval !== null) {
+      this.async.clearInterval(this.clockInterval);
+      this.clockInterval = null;
+    }
     if (this.gameEndInterval !== null) {
       this.async.clearInterval(this.gameEndInterval);
       this.gameEndInterval = null;
@@ -573,6 +587,7 @@ export class HUD extends ui.UIComponent<typeof HUD> {
         this.headshotIndicatorView(),
         this.comboIndicatorView(),
         this.playerStats.createView(),
+        this.clockView(),
         this.gameEndingOverlay(),
       ],
       style: {
@@ -956,6 +971,35 @@ export class HUD extends ui.UIComponent<typeof HUD> {
               style: { fontSize: 24, color: '#aaa', fontFamily: 'Roboto-Mono', marginTop: 20 }
             }),
           ]
+        })
+      ]
+    });
+  }
+
+  // =========================================================
+  // LOCAL CLOCK UI
+  // =========================================================
+  clockView() {
+    return ui.View({
+      style: {
+        position: 'absolute',
+        bottom: 8,
+        right: 32,
+        paddingTop: 4, paddingBottom: 4, paddingLeft: 10, paddingRight: 10,
+        backgroundColor: 'rgba(0,0,0,0.45)',
+        borderRadius: 8,
+      },
+      children: [
+        ui.Text({
+          text: this.clockTime,
+          style: {
+            fontSize: 18,
+            fontFamily: 'Roboto-Mono',
+            color: '#cccccc',
+            textShadowColor: '#000000',
+            textShadowOffset: [1, 1],
+            textShadowRadius: 2,
+          }
         })
       ]
     });
