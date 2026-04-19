@@ -75,12 +75,13 @@ export class SpawnManager {
      // Re-use or fill pool up to Max (Avoids destroying assets every wave)
      const targetPoolSize = Math.min(totalZombies, MAX_CONCURRENT_ZOMBIES);
      
-     // 1. Unload all active controllers to prepare for fresh stats
+     // 1. Unload active/paused controllers to prepare for fresh stats.
+     // NOTE: Do NOT unload Loading controllers — mid-load abort leaves them corrupted and causes
+     // spawn() to hang indefinitely on reuse. Let them finish loading; they'll be usable immediately.
      this.controllers.forEach(sc => {
          const s = sc.currentState.get();
          if (
              s === hz.SpawnState.Active ||
-             s === hz.SpawnState.Loading ||
              s === hz.SpawnState.Paused ||
              (s === hz.SpawnState.Loaded && (sc.rootEntities.get()?.length ?? 0) > 0)
          ) {
@@ -276,7 +277,10 @@ export class SpawnManager {
           return;
       }
 
-		// FIX: Throttled Staggered Spawning (Reduces engine pressure)
+		// Throttled staggered spawning — limits concurrent spawn() calls to prevent Horizon engine overload.
+		// When all slots are occupied, excess workers yield and retry after the next slot opens.
+		const SPAWN_CONCURRENCY_LIMIT = 3;
+
 		availableWorkers.forEach((sc, index) => {
 			this.reservedControllers.add(sc);
 			if (this.isClearing || this.zombiesRemainingToSpawn <= 0) return;
@@ -286,63 +290,90 @@ export class SpawnManager {
 					this.reservedControllers.delete(sc);
 					return;
 				}
-				
+
+				// HORIZON ENGINE LIMIT: Only allow N concurrent spawn() calls at once.
+				// Extra workers yield here and retry when a slot opens (via scheduleSpawnRetry).
+				if (this.pendingSpawnCount >= SPAWN_CONCURRENCY_LIMIT) {
+					this.reservedControllers.delete(sc);
+					this.scheduleSpawnRetry(400);
+					return;
+				}
+
 				this.zombiesRemainingToSpawn--;
 				this.pendingSpawnCount++;
 				this.controllerTimestamps.set(sc, Date.now());
 				this.notifyUpdate();
 
 				// HORIZON BUG WORKAROUND: spawn() promises can hang indefinitely (controller gets
-				// stuck between Loading and Active without resolving). Abort and recycle after 15s.
+				// stuck between Loading and Active without resolving). Abort and recycle after 20s.
 				let spawnSettled = false;
 				const timeoutId = this.async.setTimeout(() => {
                     if (spawnSettled) return;
                     spawnSettled = true;
-                    console.warn("[SpawnManager] Spawn timed out (15s) — aborting and retrying.");
+                    console.warn("[SpawnManager] Spawn timed out (20s) — aborting and retrying.");
                     try { sc.unload(); } catch {}
                     if (this.pendingSpawnCount > 0) this.pendingSpawnCount--;
                     this.zombiesRemainingToSpawn++;
                     this.controllerTimestamps.delete(sc);
                     this.reservedControllers.delete(sc);
                     this.notifyUpdate();
-                    this.scheduleSpawnRetry(500);
-                }, 15000);
+                    this.scheduleSpawnRetry(1000);
+                }, 20000);
 
-				// spawn() already loads asset data when needed.
-				// Avoid load()->spawn double-step to reduce startup latency.
 				const spawnPromise = sc.spawn().catch(e => { throw e; });
 
 				spawnPromise.then(() => {
-						if (spawnSettled) return; // timeout already handled this slot
+						if (spawnSettled) return;
 						spawnSettled = true;
 						this.async.clearTimeout(timeoutId);
-						// RANDOM SPAWN LOGIC (User Request)
+
 						const candidates = this.getValidSpawnLocations();
-						if (candidates.length === 0) throw new Error("No Spawn Points");
+						// BUG FIX: Don't throw here — spawnSettled is already true so the catch handler
+						// would bail without cleaning up, permanently leaking pendingSpawnCount.
+						if (candidates.length === 0) {
+							console.warn("[SpawnManager] No spawn points — refunding zombie.");
+							sc.unload();
+							if (this.pendingSpawnCount > 0) this.pendingSpawnCount--;
+							this.controllerTimestamps.delete(sc);
+							this.reservedControllers.delete(sc);
+							this.zombiesRemainingToSpawn++;
+							this.notifyUpdate();
+							this.scheduleSpawnRetry(500);
+							return;
+						}
 
-						// Pick location with basic cooldown to reduce spawn-point pileups
 						const location = this.pickSpawnLocation(candidates);
-
 						const roots = sc.rootEntities.get();
 						if (roots && roots.length > 0) {
 							const zombie = roots[0];
 							this.zombieToController.set(zombie.id, sc);
-								this.component.sendLocalEvent(location, Events.queueZombie, { 
+							this.component.sendLocalEvent(location, Events.queueZombie, {
 								zombie,
 								health: this.currentHealth,
 								speed: this.currentSpeed,
 								wave: this.currentWave
 							});
 						} else {
-							throw new Error("Spawned zombie has no root entity");
+							// BUG FIX: Same pattern — clean up properly instead of throwing.
+							console.warn("[SpawnManager] Spawned zombie has no root entity — refunding.");
+							sc.unload();
+							if (this.pendingSpawnCount > 0) this.pendingSpawnCount--;
+							this.controllerTimestamps.delete(sc);
+							this.reservedControllers.delete(sc);
+							this.zombiesRemainingToSpawn++;
+							this.notifyUpdate();
+							this.scheduleSpawnRetry(500);
+							return;
 						}
-						// Trigger update in WaveManager
+
 						this.pendingSpawnCount--;
 						this.controllerTimestamps.delete(sc);
 						this.reservedControllers.delete(sc);
-						this.notifyUpdate(); 
+						this.notifyUpdate();
+						// Immediately try to spawn the next queued zombie.
+						this.spawnNextBatch();
 				}).catch(e => {
-					if (spawnSettled) return; // timeout already handled this slot
+					if (spawnSettled) return;
 					spawnSettled = true;
 					this.async.clearTimeout(timeoutId);
 					console.error("[SpawnManager] Spawn Error: " + e);
@@ -351,9 +382,7 @@ export class SpawnManager {
 					if (this.pendingSpawnCount > 0) this.pendingSpawnCount--;
 					this.controllerTimestamps.delete(sc);
 					this.reservedControllers.delete(sc);
-					this.async.setTimeout(() => {
-						this.notifyUpdate();
-					}, 1000);
+					this.notifyUpdate();
 					this.scheduleSpawnRetry(1000);
 				});
 			}, index * SPAWN_STAGGER_MS);
