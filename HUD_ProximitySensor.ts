@@ -377,11 +377,12 @@ export class HUD_ProximitySensor {
         return Math.min(1.0, (base + pulse * (0.4 + distanceIntensity * 0.3)) * strength);
       };
 
-      // FIX: Correct mapping — forward=top, behind=bottom, right=right, left=left
+      // Correct mapping — forward=top, behind=bottom, right=right, left=left
+      // NOTE: right/left swapped to match Horizon's coordinate handedness.
       this.sensorUp.set(getOpacity(fwd),    [player]);
       this.sensorDown.set(getOpacity(bck),  [player]);
-      this.sensorRight.set(getOpacity(rgt), [player]);
-      this.sensorLeft.set(getOpacity(lft),  [player]);
+      this.sensorRight.set(getOpacity(lft), [player]);
+      this.sensorLeft.set(getOpacity(rgt),  [player]);
 
     } catch (e) { }
   }
