@@ -197,8 +197,10 @@ class WaveManager extends hz.Component<typeof WaveManager> {
         this.scheduleCountUpdate(active, total, waveTotal, remaining, dying, inFlight, pending, killed);
     };
 
-    // Clean up any leftover controllers from previous session
+    // Clean up any leftover controllers then immediately start loading all zombie
+    // bundles so they're cached before wave 1 starts (downloads during lobby time).
     this.spawner.clearControllers();
+    this.spawner.preloadPool();
 
     // Preload the ammo asset so the bundle is cached — eliminates the spawn delay on first zombie drop.
     if (this.props.ammo) {
@@ -466,10 +468,6 @@ class WaveManager extends hz.Component<typeof WaveManager> {
       // Guard against multiple timeouts stacking (prevents wave skipping)
       if (this.isSpawning && active === 0 && totalRemaining === 0 && waveTotal > 0 && !this.winConditionPending) {
           this.winConditionPending = true;
-          // NOTE: preloadForNextWave() removed — it starts async loads that startWave() immediately
-          // cancels (startWave unloads Loading controllers), leaving controllers in a broken state
-          // where subsequent spawn() calls hang indefinitely. Letting spawn() handle loading inline
-          // is slower on paper but avoids the mid-load abort corruption.
           // BUG FIX: Store timer handle so onWaveReset/Skip can cancel it before it fires.
           // Without this, a reset followed by a fast wave-complete could call newWave() twice.
           this.winConditionTimer = this.async.setTimeout(() => {

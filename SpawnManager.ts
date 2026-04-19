@@ -74,18 +74,24 @@ export class SpawnManager {
      
      const targetPoolSize = Math.min(totalZombies, MAX_CONCURRENT_ZOMBIES);
 
-     // HORIZON BUG WORKAROUND: Reusing SpawnControllers after unload() leaves them in a corrupted
-     // internal state where spawn() promises hang indefinitely (confirmed by ×30 timeout log).
-     // Dispose ALL controllers and create fresh ones each wave — fresh controllers spawn reliably.
-     this.controllers.forEach(sc => { try { sc.dispose(); } catch {} });
-     this.controllers = [];
+     // Keep controllers that are already Loaded or Loading — their bundles are cached/in-progress.
+     // Disposing a Loading controller cancels the download so the cache never populates, which
+     // was the root cause of the infinite spawn-timeout loop on first visit.
+     this.controllers = this.controllers.filter(sc => {
+         const state = sc.currentState.get();
+         if (state === hz.SpawnState.Loaded || state === hz.SpawnState.Loading) return true;
+         try { sc.dispose(); } catch {}
+         return false;
+     });
      this.controllerTimestamps.clear();
 
-     for (let i = 0; i < targetPoolSize; i++) {
-        const sc = this.createFreshController();
-        if (!sc) break;
-        this.controllers.push(sc);
-    }
+     // Fill remaining slots with fresh controllers and begin loading them immediately.
+     while (this.controllers.length < targetPoolSize) {
+         const sc = this.createFreshController();
+         if (!sc) break;
+         this.controllers.push(sc);
+         sc.load().catch(() => {});
+     }
 
     // Kickstart
     this.spawnNextBatch();
@@ -207,20 +213,23 @@ export class SpawnManager {
    * Call once at game-server start so wave-1 spawn() skips the load step entirely.
    */
   public preloadPool(targetSize: number = MAX_CONCURRENT_ZOMBIES): void {
+      const variants: hz.Asset[] = [];
+      if (this.props.maleZombie) variants.push(this.props.maleZombie);
+      if (this.props.femaleZombie) variants.push(this.props.femaleZombie);
+      if (this.props.skeletonZombie) variants.push(this.props.skeletonZombie);
+      if (this.props.lichZombie) variants.push(this.props.lichZombie);
+      if (this.props.henchmanZombie) variants.push(this.props.henchmanZombie);
+      if (variants.length === 0) return;
+
+      // Load one controller per variant first — guarantees all bundles get cached.
+      for (const prefab of variants) {
+          if (this.controllers.length >= targetSize) break;
+          const sc = new hz.SpawnController(prefab, new hz.Vec3(0, -1500, 0), hz.Quaternion.one, hz.Vec3.one);
+          this.controllers.push(sc);
+      }
+      // Fill remaining slots with random variants.
       while (this.controllers.length < targetSize) {
-          const variants: hz.Asset[] = [];
-          if (this.props.maleZombie) variants.push(this.props.maleZombie);
-          if (this.props.femaleZombie) variants.push(this.props.femaleZombie);
-          if (this.props.skeletonZombie) variants.push(this.props.skeletonZombie);
-          if (this.props.lichZombie) variants.push(this.props.lichZombie);
-          if (this.props.henchmanZombie) variants.push(this.props.henchmanZombie);
-
-          let prefab = this.props.maleZombie;
-          if (variants.length > 0) {
-              prefab = variants[Math.floor(Math.random() * variants.length)];
-          }
-          if (!prefab) break;
-
+          const prefab = variants[Math.floor(Math.random() * variants.length)];
           const sc = new hz.SpawnController(prefab, new hz.Vec3(0, -1500, 0), hz.Quaternion.one, hz.Vec3.one);
           this.controllers.push(sc);
       }
@@ -283,15 +292,19 @@ export class SpawnManager {
                     try { sc.dispose(); } catch {}
                     if (idx > -1) {
                         const fresh = this.createFreshController();
-                        if (fresh) this.controllers[idx] = fresh;
-                        else this.controllers.splice(idx, 1);
+                        if (fresh) {
+                            this.controllers[idx] = fresh;
+                            fresh.load().catch(() => {});
+                        } else this.controllers.splice(idx, 1);
                     }
                     this.notifyUpdate();
                     this.scheduleSpawnRetry(1000);
                 }, 90000);
 
-				// Two-step: load() makes L visible in debug; spawn() on Loaded controller is fast.
-				sc.load()
+				// Skip load() if already Loaded (preloaded during lobby) — spawn() is near-instant.
+				// Otherwise call load() first; may take 30-60s on first Quest visit.
+				const alreadyLoaded = sc.currentState.get() === hz.SpawnState.Loaded;
+				(alreadyLoaded ? Promise.resolve() : sc.load())
 					.then(() => {
 						if (spawnSettled) return Promise.reject('settled');
 						return sc.spawn();
@@ -355,8 +368,10 @@ export class SpawnManager {
 						try { sc.dispose(); } catch {}
 						if (idx > -1) {
 							const fresh = this.createFreshController();
-							if (fresh) this.controllers[idx] = fresh;
-							else this.controllers.splice(idx, 1);
+							if (fresh) {
+                                this.controllers[idx] = fresh;
+                                fresh.load().catch(() => {});
+                            } else this.controllers.splice(idx, 1);
 						}
 						this.notifyUpdate();
 						this.scheduleSpawnRetry(1000);
@@ -502,8 +517,10 @@ export class SpawnManager {
       try { sc.dispose(); } catch {}
       if (idx > -1) {
           const fresh = this.createFreshController();
-          if (fresh) this.controllers[idx] = fresh;
-          else this.controllers.splice(idx, 1);
+          if (fresh) {
+              this.controllers[idx] = fresh;
+              fresh.load().catch(() => {}); // Pre-load so it's ready for the next spawn slot
+          } else this.controllers.splice(idx, 1);
       }
       this.spawnNextBatch();
   }
