@@ -72,45 +72,18 @@ export class SpawnManager {
       this.reservedControllers.clear();
       this.clearSpawnRetry();
      
-     // Re-use or fill pool up to Max (Avoids destroying assets every wave)
      const targetPoolSize = Math.min(totalZombies, MAX_CONCURRENT_ZOMBIES);
-     
-     // 1. Unload active/paused controllers to prepare for fresh stats.
-     // NOTE: Do NOT unload Loading controllers — mid-load abort leaves them corrupted and causes
-     // spawn() to hang indefinitely on reuse. Let them finish loading; they'll be usable immediately.
-     this.controllers.forEach(sc => {
-         const s = sc.currentState.get();
-         if (
-             s === hz.SpawnState.Active ||
-             s === hz.SpawnState.Paused ||
-             (s === hz.SpawnState.Loaded && (sc.rootEntities.get()?.length ?? 0) > 0)
-         ) {
-              sc.unload();
-         }
-         this.controllerTimestamps.delete(sc);
-     });
 
-     // 2. Expand pool if needed
-     while (this.controllers.length < targetPoolSize) {
-        // Dynamic spawn selection
-        const variants: hz.Asset[] = [];
-        if (this.props.maleZombie) variants.push(this.props.maleZombie);
-        if (this.props.femaleZombie) variants.push(this.props.femaleZombie);
-        if (this.props.skeletonZombie) variants.push(this.props.skeletonZombie);
-        if (this.props.lichZombie) variants.push(this.props.lichZombie);
-        if (this.props.henchmanZombie) variants.push(this.props.henchmanZombie);
+     // HORIZON BUG WORKAROUND: Reusing SpawnControllers after unload() leaves them in a corrupted
+     // internal state where spawn() promises hang indefinitely (confirmed by ×30 timeout log).
+     // Dispose ALL controllers and create fresh ones each wave — fresh controllers spawn reliably.
+     this.controllers.forEach(sc => { try { sc.dispose(); } catch {} });
+     this.controllers = [];
+     this.controllerTimestamps.clear();
 
-        let prefab = this.props.maleZombie; 
-        if (variants.length > 0) {
-            prefab = variants[Math.floor(Math.random() * variants.length)];
-        }
-        
-        if (!prefab) {
-            console.error("[SpawnManager] ERROR: No zombie assets assigned in WaveManager props!");
-            break;
-        }
-
-        const sc = new hz.SpawnController(prefab, new hz.Vec3(0, -1500, 0), hz.Quaternion.one, hz.Vec3.one);
+     for (let i = 0; i < targetPoolSize; i++) {
+        const sc = this.createFreshController();
+        if (!sc) break;
         this.controllers.push(sc);
     }
 
@@ -304,20 +277,27 @@ export class SpawnManager {
 				this.controllerTimestamps.set(sc, Date.now());
 				this.notifyUpdate();
 
-				// HORIZON BUG WORKAROUND: spawn() promises can hang indefinitely (controller gets
-				// stuck between Loading and Active without resolving). Abort and recycle after 20s.
+				// HORIZON BUG WORKAROUND: spawn() on reused controllers hangs indefinitely.
+				// After 20s abort: dispose the hung controller and replace with a fresh one.
 				let spawnSettled = false;
 				const timeoutId = this.async.setTimeout(() => {
                     if (spawnSettled) return;
                     spawnSettled = true;
-                    console.warn("[SpawnManager] Spawn timed out (20s) — aborting and retrying.");
-                    try { sc.unload(); } catch {}
+                    console.warn("[SpawnManager] Spawn timed out (20s) — replacing controller and retrying.");
                     if (this.pendingSpawnCount > 0) this.pendingSpawnCount--;
                     this.zombiesRemainingToSpawn++;
                     this.controllerTimestamps.delete(sc);
                     this.reservedControllers.delete(sc);
+                    // Dispose hung controller and slot in a fresh one.
+                    const idx = this.controllers.indexOf(sc);
+                    try { sc.dispose(); } catch {}
+                    if (idx > -1) {
+                        const fresh = this.createFreshController();
+                        if (fresh) this.controllers[idx] = fresh;
+                        else this.controllers.splice(idx, 1);
+                    }
                     this.notifyUpdate();
-                    this.scheduleSpawnRetry(1000);
+                    this.scheduleSpawnRetry(500);
                 }, 20000);
 
 				const spawnPromise = sc.spawn().catch(e => { throw e; });
@@ -519,8 +499,29 @@ export class SpawnManager {
           this.async.setTimeout(() => this.checkAndRecycle(sc, gen), 100);
           return;
       }
+      // Dispose recycled controller and replace with a fresh one.
+      // Reused controllers silently hang on spawn() — always create fresh.
       this.reservedControllers.delete(sc);
+      const idx = this.controllers.indexOf(sc);
+      try { sc.dispose(); } catch {}
+      if (idx > -1) {
+          const fresh = this.createFreshController();
+          if (fresh) this.controllers[idx] = fresh;
+          else this.controllers.splice(idx, 1);
+      }
       this.spawnNextBatch();
+  }
+
+  private createFreshController(): hz.SpawnController | null {
+      const variants: hz.Asset[] = [];
+      if (this.props.maleZombie) variants.push(this.props.maleZombie);
+      if (this.props.femaleZombie) variants.push(this.props.femaleZombie);
+      if (this.props.skeletonZombie) variants.push(this.props.skeletonZombie);
+      if (this.props.lichZombie) variants.push(this.props.lichZombie);
+      if (this.props.henchmanZombie) variants.push(this.props.henchmanZombie);
+      if (variants.length === 0) return null;
+      const prefab = variants[Math.floor(Math.random() * variants.length)];
+      return new hz.SpawnController(prefab, new hz.Vec3(0, -1500, 0), hz.Quaternion.one, hz.Vec3.one);
   }
 
   private notifyUpdate() {
