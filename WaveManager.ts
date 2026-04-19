@@ -469,9 +469,10 @@ class WaveManager extends hz.Component<typeof WaveManager> {
       // Guard against multiple timeouts stacking (prevents wave skipping)
       if (this.isSpawning && active === 0 && totalRemaining === 0 && waveTotal > 0 && !this.winConditionPending) {
           this.winConditionPending = true;
-          // PERF: Pre-load idle controllers NOW so they're in Loaded state when the next wave fires.
-          // The 1s confirmation window below is otherwise dead time — this hides load latency inside it.
-          if (this.spawner) this.spawner.preloadForNextWave();
+          // NOTE: preloadForNextWave() removed — it starts async loads that startWave() immediately
+          // cancels (startWave unloads Loading controllers), leaving controllers in a broken state
+          // where subsequent spawn() calls hang indefinitely. Letting spawn() handle loading inline
+          // is slower on paper but avoids the mid-load abort corruption.
           // BUG FIX: Store timer handle so onWaveReset/Skip can cancel it before it fires.
           // Without this, a reset followed by a fast wave-complete could call newWave() twice.
           this.winConditionTimer = this.async.setTimeout(() => {

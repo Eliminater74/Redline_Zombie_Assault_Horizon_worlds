@@ -292,15 +292,29 @@ export class SpawnManager {
 				this.controllerTimestamps.set(sc, Date.now());
 				this.notifyUpdate();
 
+				// HORIZON BUG WORKAROUND: spawn() promises can hang indefinitely (controller gets
+				// stuck between Loading and Active without resolving). Abort and recycle after 15s.
+				let spawnSettled = false;
 				const timeoutId = this.async.setTimeout(() => {
-                    console.warn("[SpawnManager] Internal Spawn Timeout triggered (45s).");
-                }, 45000);
+                    if (spawnSettled) return;
+                    spawnSettled = true;
+                    console.warn("[SpawnManager] Spawn timed out (15s) — aborting and retrying.");
+                    try { sc.unload(); } catch {}
+                    if (this.pendingSpawnCount > 0) this.pendingSpawnCount--;
+                    this.zombiesRemainingToSpawn++;
+                    this.controllerTimestamps.delete(sc);
+                    this.reservedControllers.delete(sc);
+                    this.notifyUpdate();
+                    this.scheduleSpawnRetry(500);
+                }, 15000);
 
 				// spawn() already loads asset data when needed.
 				// Avoid load()->spawn double-step to reduce startup latency.
 				const spawnPromise = sc.spawn().catch(e => { throw e; });
 
 				spawnPromise.then(() => {
+						if (spawnSettled) return; // timeout already handled this slot
+						spawnSettled = true;
 						this.async.clearTimeout(timeoutId);
 						// RANDOM SPAWN LOGIC (User Request)
 						const candidates = this.getValidSpawnLocations();
@@ -328,6 +342,8 @@ export class SpawnManager {
 						this.reservedControllers.delete(sc);
 						this.notifyUpdate(); 
 				}).catch(e => {
+					if (spawnSettled) return; // timeout already handled this slot
+					spawnSettled = true;
 					this.async.clearTimeout(timeoutId);
 					console.error("[SpawnManager] Spawn Error: " + e);
 					sc.unload();
@@ -336,9 +352,7 @@ export class SpawnManager {
 					this.controllerTimestamps.delete(sc);
 					this.reservedControllers.delete(sc);
 					this.async.setTimeout(() => {
-						this.notifyUpdate(); 
-						// REMOVED: Immediate retry. 
-                        // Slower-is-Faster: Let the 5s Watchdog handle it to avoid "thundering herd" choking the engine.
+						this.notifyUpdate();
 					}, 1000);
 					this.scheduleSpawnRetry(1000);
 				});

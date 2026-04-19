@@ -164,8 +164,9 @@ class WeaponManager extends hz.Component<typeof WeaponManager> {
     // Store controller immediately so watchdog doesn't trigger
     this.playerControllers.set(player.id, sc);
 
-    sc.load()
-      .then(() => sc.spawn())
+    // PERF: spawn() handles loading internally in one step — no need for load().then(spawn())
+    // which adds a full extra async round-trip before the weapon appears.
+    sc.spawn()
       .then(() => {
         // Safety: Check if player still exists
         if (!player.isValidReference.get()) {
