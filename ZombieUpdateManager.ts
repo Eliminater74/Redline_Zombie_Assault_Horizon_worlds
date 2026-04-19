@@ -155,18 +155,21 @@ class ZombieUpdateManager extends hz.Component<typeof ZombieUpdateManager> {
      * the cost of N separate event dispatches.
      */
     private onFrameUpdate(): void {
-        // Iterate all registered zombies and call their update
-        zombieRegistry.forEach((updatable) => {
+        // Collect IDs to evict after iteration (can't mutate Map during forEach)
+        const toEvict: bigint[] = [];
+
+        zombieRegistry.forEach((updatable, id) => {
             try {
                 updatable.update();
             } catch (e) {
-                // If a zombie's update fails, log but don't break the loop
-                // This prevents one broken zombie from stopping all updates
-                console.error("[ZombieUpdateManager] Update failed for zombie:", e);
-                // Auto-remove broken zombies? Maybe safer to leave them unless they error repeatedly.
-                // For now, let Zombie.ts handle self-unregistration on error.
+                // Auto-evict zombies whose update() throws — prevents endless error spam
+                // each frame for a zombie that is in a broken state.
+                console.error("[ZombieUpdateManager] Auto-evicting broken zombie:", id, e);
+                toEvict.push(id);
             }
         });
+
+        toEvict.forEach(id => zombieRegistry.delete(id));
     }
 }
 

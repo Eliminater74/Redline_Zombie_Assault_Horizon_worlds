@@ -62,6 +62,10 @@ class PlayerManager extends hz.Component<typeof PlayerManager> {
   private playerLastKillTime = new Map<number, number>();
   private playerComboCount = new Map<number, number>();
 
+  // HORIZON BUG WORKAROUND: Timer/Interval race conditions — track ALL one-shot timers so
+  // cleanup() can cancel them if the component is destroyed while they're still pending.
+  private pendingTimers: number[] = [];
+
   private isServer(): boolean {
     return this.entity.owner.get().id === this.world.getServerPlayer().id;
   }
@@ -76,6 +80,8 @@ class PlayerManager extends hz.Component<typeof PlayerManager> {
       this.async.clearInterval(this.playerListTimer);
       this.playerListTimer = null;
     }
+    this.pendingTimers.forEach(t => this.async.clearTimeout(t));
+    this.pendingTimers = [];
   }
 
 // ...
@@ -325,9 +331,9 @@ class PlayerManager extends hz.Component<typeof PlayerManager> {
               name: `Game reset by ${data.playerName}`
           });
           this.endGame();
-          this.async.setTimeout(() => {
+          this.pendingTimers.push(this.async.setTimeout(() => {
               this.sendNetworkBroadcastEvent(Events.startGame, {});
-          }, 300);
+          }, 300));
           return;
       }
 
@@ -576,7 +582,7 @@ class PlayerManager extends hz.Component<typeof PlayerManager> {
         const textGizmo = this.props.welcomeText.as(hz.TextGizmo);
         if (textGizmo) {
             textGizmo.text.set(`Welcome,\n${name}!`);
-            this.async.setTimeout(() => textGizmo.text.set(""), 5000);
+            this.pendingTimers.push(this.async.setTimeout(() => textGizmo.text.set(""), 5000));
         }
     }
     
@@ -589,19 +595,19 @@ class PlayerManager extends hz.Component<typeof PlayerManager> {
                 this.playerKills.set(player.id, savedKills);
                 
                 // Update HUD for this player immediately
-                this.async.setTimeout(() => {
-                    this.sendNetworkBroadcastEvent(Events.updateKillCount, { 
-                        count: savedKills, 
-                        player: player 
+                this.pendingTimers.push(this.async.setTimeout(() => {
+                    this.sendNetworkBroadcastEvent(Events.updateKillCount, {
+                        count: savedKills,
+                        player: player
                     });
-                    
+
                     // FORCE SYNC: Upload to leaderboard immediately on join
                     this.sendLocalBroadcastEvent(Events.updateLeaderboard, {
                         player,
                         stat: 'kills',
                         value: savedKills
                     });
-                }, 1000); 
+                }, 1000)); 
             }
         } catch(e) { console.warn("Failed to load kills", e); }
         
@@ -612,13 +618,13 @@ class PlayerManager extends hz.Component<typeof PlayerManager> {
                 this.playerHeadshots.set(player.id, savedHeadshots);
                 
                 // FORCE SYNC: Upload to leaderboard immediately on join
-                this.async.setTimeout(() => {
+                this.pendingTimers.push(this.async.setTimeout(() => {
                     this.sendLocalBroadcastEvent(Events.updateLeaderboard, {
                         player,
                         stat: 'headshots',
                         value: savedHeadshots
                     });
-                }, 1200);
+                }, 1200));
             }
         } catch(e) { console.warn("Failed to load headshots", e); }
         
@@ -631,9 +637,9 @@ class PlayerManager extends hz.Component<typeof PlayerManager> {
         } catch(e) { console.warn("Failed to load wave", e); }
         
         // Send initial stats package
-        this.async.setTimeout(() => {
+        this.pendingTimers.push(this.async.setTimeout(() => {
             this.sendPlayerStats(player);
-        }, 1500); // 1.5s delay to allow visits to load from WelcomeSign event
+        }, 1500)); // 1.5s delay to allow visits to load from WelcomeSign event
     }
   }
 
@@ -695,7 +701,7 @@ class PlayerManager extends hz.Component<typeof PlayerManager> {
     }, 2000);
     
     // Initial broadcast
-    this.async.setTimeout(() => this.broadcastPlayerList(), 500);
+    this.pendingTimers.push(this.async.setTimeout(() => this.broadcastPlayerList(), 500));
   }
 
   private broadcastPlayerList() {

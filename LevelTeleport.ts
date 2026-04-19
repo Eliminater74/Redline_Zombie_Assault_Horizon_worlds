@@ -6,9 +6,7 @@ class LevelTeleport extends hz.Component<typeof LevelTeleport>{
     tpSfx: { type: hz.PropTypes.Entity },
   };
 
-  private playerCheckpoints: Map<number, hz.SpawnPointGizmo> = new Map();
-
-  start() { 
+  start() {
     this.connectCodeBlockEvent(this.entity, hz.CodeBlockEvents.OnPlayerEnterTrigger, (player: hz.Player) => {
       this.onPlayerEnter(player);
     });
@@ -28,7 +26,6 @@ class LevelTeleport extends hz.Component<typeof LevelTeleport>{
       // HORIZON BUG WORKAROUND: Missing null checks on .get()/.as() results — validate before use.
       const checkpoint = this.props.teleportTo.as(hz.SpawnPointGizmo);
       if (checkpoint) {
-        this.playerCheckpoints.set(player.id, checkpoint);
         checkpoint.teleportPlayer(player);
       }
     }

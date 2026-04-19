@@ -36,8 +36,6 @@ class KillBooster extends hz.Component<typeof KillBooster> {
       return;
     }
 
-    this.usedPlayers.add(player.id);
-
     try {
       // Get current kills from persistent storage
       const result = await this.world.persistentStorage.getPlayerVariable(player, this.KILLS_KEY);
@@ -46,6 +44,9 @@ class KillBooster extends hz.Component<typeof KillBooster> {
 
       // Update persistent storage
       this.world.persistentStorage.setPlayerVariable(player, this.KILLS_KEY, newKills);
+
+      // Mark as used only after save succeeds — prevents locking player out if save fails
+      this.usedPlayers.add(player.id);
 
       // Update leaderboard
       this.world.leaderboards.setScoreForPlayer(GameConfig.LEADERBOARD_KILLS, player, newKills, true);
