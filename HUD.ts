@@ -145,8 +145,16 @@ export class HUD extends ui.UIComponent<typeof HUD> {
     const players = this.world.getPlayers();
     players.forEach(p => this.onPlayerJoin(p));
 
-    // Local clock — updates every second using the player's device time (12-hour format).
-    const getTime = () => new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+    // Local clock — manual 12-hour format (toLocaleTimeString options unsupported in HW runtime).
+    const getTime = () => {
+      const d = new Date();
+      let h = d.getHours();
+      const m = d.getMinutes().toString().padStart(2, '0');
+      const s = d.getSeconds().toString().padStart(2, '0');
+      const ampm = h >= 12 ? 'PM' : 'AM';
+      h = h % 12 || 12;
+      return `${h}:${m}:${s} ${ampm}`;
+    };
     this.clockTime.set(getTime());
     this.clockInterval = this.async.setInterval(() => {
       this.clockTime.set(getTime());
