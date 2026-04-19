@@ -17,5 +17,13 @@ class Portal_RandomSpawnPoint_Entity extends Component<typeof Portal_RandomSpawn
       portal_Data.randomSpawnPointArray.push(spawnPoint);
     }
   }
+
+  preDestroy(): void {
+    // Remove from global array on destroy — prevents stale references accumulating over sessions.
+    const spawnPoint = this.entity.as(SpawnPointGizmo);
+    if (!spawnPoint) return;
+    const idx = portal_Data.randomSpawnPointArray.indexOf(spawnPoint);
+    if (idx > -1) portal_Data.randomSpawnPointArray.splice(idx, 1);
+  }
 }
 Component.register(Portal_RandomSpawnPoint_Entity);

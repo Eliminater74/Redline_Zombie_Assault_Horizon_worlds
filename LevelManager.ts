@@ -39,6 +39,8 @@ class LevelManager extends hz.Component<typeof LevelManager> {
   private playerXP = new Map<number, number>();
   private playerLevel = new Map<number, number>();
   private playersInGame = new Set<number>(); // Track who is in the current game
+  // HORIZON BUG WORKAROUND: Track one-shot join timers so cleanup() can cancel them.
+  private pendingJoinTimers: number[] = [];
 
   private isServer(): boolean {
     return this.entity.owner.get().id === this.world.getServerPlayer().id;
@@ -204,8 +206,15 @@ class LevelManager extends hz.Component<typeof LevelManager> {
   }
 
   private onPlayerEnter(player: hz.Player) {
-    // Load player's XP from persistent storage
-    this.async.setTimeout(async () => {
+    // Load player's XP from persistent storage — defer 2s for Horizon data to be ready.
+    const t = this.async.setTimeout(async () => {
+      // Remove from tracking array when fired
+      const idx = this.pendingJoinTimers.indexOf(t);
+      if (idx > -1) this.pendingJoinTimers.splice(idx, 1);
+
+      // Guard: player may have left during the 2s window
+      try { if (!player.isValidReference.get()) return; } catch { return; }
+
       try {
         // HORIZON BUG WORKAROUND: getPlayerVariable is synchronous on server; wrap in try/catch for safety.
         const savedXP = this.world.persistentStorage.getPlayerVariable<number>(player, this.XP_KEY);
@@ -217,7 +226,6 @@ class LevelManager extends hz.Component<typeof LevelManager> {
 
         console.log(`[LevelManager] Loaded ${player.name.get()}: Level ${level}, XP ${xp}`);
 
-        // Send initial level info to player
         this.sendNetworkEvent(player, Events.levelSync, {
           level,
           totalXP: xp,
@@ -225,14 +233,20 @@ class LevelManager extends hz.Component<typeof LevelManager> {
           xpToNext: this.xpForLevel(level + 1) - xp
         });
 
-        // Ensure Level Leaderboard is synced
         PersistenceManager.saveXP(this.world, player, xp, level);
       } catch (e) {
         console.warn("[LevelManager] Failed to load XP for player:", e);
         this.playerXP.set(player.id, 0);
         this.playerLevel.set(player.id, 0);
       }
-    }, 2000); // Wait for data to be ready
+    }, 2000);
+    this.pendingJoinTimers.push(t);
+  }
+
+  // HORIZON BUG WORKAROUND: Cancel pending join timers if component is destroyed mid-game.
+  cleanup(): void {
+    this.pendingJoinTimers.forEach(t => this.async.clearTimeout(t));
+    this.pendingJoinTimers = [];
   }
 
   // =========================================================================

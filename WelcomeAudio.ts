@@ -11,65 +11,62 @@ class WelcomeAudio extends hz.Component<typeof WelcomeAudio> {
     delay: { type: hz.PropTypes.Number, default: 5.0 }, // Wait for load (VR needs more time)
   };
 
-  // HORIZON BUG WORKAROUND: Timer/Interval race conditions after destroy — track destroyed state.
+  // HORIZON BUG WORKAROUND: Timer/Interval race conditions after destroy — store ALL timer handles.
+  private pollTimer: number | null = null;
+  private playTimer: number | null = null;
   private isDestroyed = false;
 
   start() {
     // Polling approach: Wait for Local Player to exist, then play.
-    // This avoids Type Errors with events and handles VR loading delays.
     this.waitForLocalPlayer();
   }
 
-  // HORIZON BUG WORKAROUND: Timer/Interval race conditions after destroy — cancel polling in cleanup().
+  // HORIZON BUG WORKAROUND: Cancel both timers so neither fires after component destroy.
   cleanup(): void {
     this.isDestroyed = true;
+    if (this.pollTimer !== null) { this.async.clearTimeout(this.pollTimer); this.pollTimer = null; }
+    if (this.playTimer !== null) { this.async.clearTimeout(this.playTimer); this.playTimer = null; }
   }
 
   private waitForLocalPlayer() {
-    // Check if player exists yet
     if (this.isDestroyed) return;
     const player = this.world.getLocalPlayer();
     if (player) {
-         this.playMessage();
-         return;
+      this.playMessage();
+      return;
     }
-
-    // Try again in 1 second
-    this.async.setTimeout(() => this.waitForLocalPlayer(), 1000);
+    // Try again in 1 second — store handle so cleanup() can cancel mid-poll
+    this.pollTimer = this.async.setTimeout(() => {
+      this.pollTimer = null;
+      this.waitForLocalPlayer();
+    }, 1000);
   }
 
   private hasPlayed = false;
 
   private playMessage() {
-    if (this.hasPlayed) return; // Enforce play-once per session
-    
+    if (this.hasPlayed) return;
+
     if (!this.props.audio) {
-        console.warn("[WelcomeAudio] No Audio Gizmo assigned!");
-        return;
+      console.warn("[WelcomeAudio] No Audio Gizmo assigned!");
+      return;
     }
 
     const delay = this.props.delay ?? 2.0;
     const audioEntity = this.props.audio;
 
-    // Wait a moment for world to settle
-    this.async.setTimeout(() => {
-        if (!audioEntity) return; 
-
-        // Check again to be safe
-        if (this.hasPlayed) return;
-
-        const gizmo = audioEntity.as(hz.AudioGizmo);
-        if (gizmo) {
-            // FIX: Using play() directly.
-            // RECOMMENDATION: Set this Audio Gizmo to '2D' (Global) in the Editor
-            // so it plays clearly for the player regardless of spawn position.
-            // Moving the entity caused conflicts in multiplayer.
-            
-            gizmo.stop();
-            gizmo.play(); 
-            this.hasPlayed = true;
-            console.log("[WelcomeAudio] Playing welcome message (Once Only)...");
-        }
+    // Store handle so cleanup() can cancel if component is destroyed during the delay
+    this.playTimer = this.async.setTimeout(() => {
+      this.playTimer = null;
+      if (this.isDestroyed || this.hasPlayed) return;
+      const gizmo = audioEntity.as(hz.AudioGizmo);
+      if (gizmo) {
+        // HORIZON BUG WORKAROUND: Audio double-play — always stop before play on AudioGizmo.
+        gizmo.stop();
+        gizmo.play();
+        this.hasPlayed = true;
+        console.log("[WelcomeAudio] Playing welcome message (Once Only)...");
+      }
     }, delay * 1000);
   }
 }

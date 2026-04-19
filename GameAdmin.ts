@@ -36,6 +36,7 @@ class GameAdmin extends hz.Component<typeof GameAdmin> {
   private holdTime = 0;
   private readonly holdDuration = 10;
   private holdTimer: number | null = null;
+  private statusClearTimer: number | null = null;
 
   start() { }
 
@@ -44,6 +45,10 @@ class GameAdmin extends hz.Component<typeof GameAdmin> {
     if (this.holdTimer !== null) {
       this.async.clearInterval(this.holdTimer);
       this.holdTimer = null;
+    }
+    if (this.statusClearTimer !== null) {
+      this.async.clearTimeout(this.statusClearTimer);
+      this.statusClearTimer = null;
     }
   }
 
@@ -180,9 +185,15 @@ class GameAdmin extends hz.Component<typeof GameAdmin> {
       const display = this.props.statusDisplay?.as(hz.TextGizmo);
       if (display) {
           display.text.set(msg);
-          // Auto-clear after 3s if not holding
+          // Auto-clear after 3s — cancel any previous pending clear first to avoid stacking.
           if (!this.isHolding) {
-              this.async.setTimeout(() => display.text.set(""), 3000);
+              if (this.statusClearTimer !== null) {
+                  this.async.clearTimeout(this.statusClearTimer);
+              }
+              this.statusClearTimer = this.async.setTimeout(() => {
+                  this.statusClearTimer = null;
+                  display.text.set("");
+              }, 3000);
           }
       }
   }
