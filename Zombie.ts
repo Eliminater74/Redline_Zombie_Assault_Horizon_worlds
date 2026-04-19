@@ -7,6 +7,9 @@ import { Events } from 'Events';
 import { ZombieNavigator } from 'ZombieNav';
 import { registerZombie, unregisterZombie, IUpdatable } from 'ZombieUpdateManager';
 
+// Shared across all Zombie instances — tracks zombie count per target player for cooperative targeting in multiplayer.
+const targetPressure = new Map<number, number>();
+
 /**
  * ============================================================================
  * ZOMBIE AI CONTROLLER
@@ -122,6 +125,8 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
   private readonly thinkInterval = 200;
   /** Cached think interval based on LOD */
   private currentThinkInterval = 200;
+  /** Wave-scaled base think interval (updated at spawn, LOD throttles up from here) */
+  private waveThinkInterval = 200;
   /** Timestamp of last LOD distance check */
   private lastLODCheckTime = 0;
   /** Throttle for navigation updates (1 = every frame, 10 = every 10th frame) */
@@ -250,6 +255,7 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
       this.async.clearTimeout(this.attackDamageTimer);
       this.attackDamageTimer = null;
     }
+    this.setTarget(null);
     unregisterZombie(this);
   }
 
@@ -407,7 +413,7 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
   }
 
   private calculateLOD(myPos: hz.Vec3) {
-      this.currentThinkInterval = this.thinkInterval; // Default 200ms
+      this.currentThinkInterval = this.waveThinkInterval; // Wave-scaled base
       this.currentNavThrottle = 1; // Default every frame
 
       if (alivePlayers.length > 0) {
@@ -421,9 +427,9 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
               if (d < closestDistSq) closestDistSq = d;
           }
 
-          // BRAIN LOD
+          // BRAIN LOD: throttle at distance but scale from wave-scaled base
           if (closestDistSq > 900) { // > 30m
-              this.currentThinkInterval = 500;
+              this.currentThinkInterval = Math.round(this.waveThinkInterval * 2.5);
           }
 
           // NAV LOD
@@ -464,6 +470,18 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
    * Lower scores = higher priority targets.
    * Wounded players are prioritized over healthy ones.
    */
+  private setTarget(newTarget: hz.Player | null): void {
+      if (this.currentTarget?.id === newTarget?.id) return;
+      if (this.currentTarget !== null) {
+          const prev = targetPressure.get(this.currentTarget.id) ?? 0;
+          targetPressure.set(this.currentTarget.id, Math.max(0, prev - 1));
+      }
+      this.currentTarget = newTarget;
+      if (newTarget !== null) {
+          targetPressure.set(newTarget.id, (targetPressure.get(newTarget.id) ?? 0) + 1);
+      }
+  }
+
   // PERF: myPos passed from updateBrain() to avoid re-reading entity.position.get() every brain tick.
   private updateTargetSelection(now: number, myPos: hz.Vec3, potentialTargets: hz.Player[]): void {
 
@@ -478,7 +496,14 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
     // Validate current target still exists
     if (this.currentTarget) {
         if (!potentialTargets.some(p => p.id === this.currentTarget!.id)) {
-            this.currentTarget = null;
+            // Remember last known position so zombie pursues even after target disappears.
+            try {
+                if (!this.investigatePos) {
+                    this.investigatePos = this.currentTarget.position.get();
+                    this.investigateTimeout = Date.now() + 8000;
+                }
+            } catch {}
+            this.setTarget(null);
         }
     }
 
@@ -521,7 +546,9 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
         const healthBonus = (10 - hp) * 1.5;
         const antiClumpJitter = (player.id % 7) * 0.12;
         const aggroBonus = activeAggroTargetId !== null && player.id === activeAggroTargetId ? -6 : 0;
-        const score = dist - healthBonus + antiClumpJitter + aggroBonus;
+        // Cooperative targeting: in multiplayer, penalize players that already have many zombies on them.
+        const pressure = potentialTargets.length > 1 ? (targetPressure.get(player.id) ?? 0) : 0;
+        const score = dist - healthBonus + antiClumpJitter + aggroBonus + pressure * 2.0;
 
         if (score < bestScore) {
             bestScore = score;
@@ -552,13 +579,13 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
     }
 
     if (!bestTarget) {
-        this.currentTarget = null;
+        this.setTarget(null);
         return;
     }
 
     // Sticky Targeting: Only switch targets if new target is significantly better
     if (!this.currentTarget) {
-        this.currentTarget = bestTarget;
+        this.setTarget(bestTarget);
     } else if (bestTarget.id !== this.currentTarget.id) {
         // Only switch if score improves by at least 5 points
         // HORIZON BUG WORKAROUND: Vec3.distanceSquared() unsupported in HW runtime.
@@ -572,7 +599,7 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
         const currentScore = Math.sqrt(currentDistSq) - (10 - currentHp) * 1.5 + currentJitter + currentAggroBonus;
 
         if (bestScore < currentScore - 5) {
-            this.currentTarget = bestTarget;
+            this.setTarget(bestTarget);
         }
     }
 
@@ -675,12 +702,19 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
     // Reset Combat State
     this.currentHealth = this.spawnHealth;
     this.closePlayer = null;
-    this.currentTarget = null;
+    this.setTarget(null);
     this.aggroTargetId = null;
     this.aggroExpireTime = 0;
     this.isRampaging = false;
     this.nextAttackTime = 0;
     this.isDead = false;
+
+    // Wave-scaled aggression: faster attacks, wider reach, quicker brain at higher waves (caps at wave 30).
+    const waveT = Math.min((this.spawnWave - 1) / 29, 1.0);
+    this.attackCooldown = Math.round(2500 - waveT * 800);    // 2500ms → 1700ms
+    this.attackRange = 2.5 + waveT * 0.5;                   // 2.5m → 3.0m
+    this.waveThinkInterval = Math.round(200 - waveT * 80);   // 200ms → 120ms
+    this.currentThinkInterval = this.waveThinkInterval;
 
     // Reset Staggering logic (AI Tick Offset for performance)
     // Random offset prevents all zombies from thinking on the same frame
@@ -743,7 +777,7 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
 
     // Switch target to attacker if they're a valid player
     if (data.instigator && alivePlayerIds.has(data.instigator!.id)) {
-        this.currentTarget = data.instigator;
+        this.setTarget(data.instigator);
         this.aggroTargetId = data.instigator.id;
         this.aggroExpireTime = Date.now() + 7000;
     }
@@ -870,6 +904,7 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
     if (this.isServer()) {
         this.agent.clearDestination();
         this.agent.isImmobile.set(true);
+        this.setTarget(null);
     }
 
     // Update state
