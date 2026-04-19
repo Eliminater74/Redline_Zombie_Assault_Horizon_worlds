@@ -99,7 +99,7 @@ export class HUD extends ui.UIComponent<typeof HUD> {
   // PRESTART
   // ---------------------------------------------------------
   preStart(): void {
-    console.log("[HUD] Script Loaded v2.1 (Optimized)");
+    console.log("[HUD] Script Loaded v26.0.0");
     
     // Initialize Sub-Components if not already done
     if (!this.proximitySensor) this.proximitySensor = new HUD_ProximitySensor(this);

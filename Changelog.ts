@@ -11,20 +11,22 @@ class Changelog extends hz.Component<typeof Changelog> {
     const textGizmo = this.entity.as(hz.TextGizmo);
     if (textGizmo) {
         textGizmo.text.set(
-            "=== UPDATE v25.1.0 (Apr 18) ===\n" +
-            "PERFORMANCE & BUG FIX PASS\n\n" +
-            "• Ammo drops now instant\n" +
-            "  - No more invisible boxes on spawn\n" +
-            "• Zombie kill count now accurate\n" +
-            "  - HUD updates immediately on kill\n" +
-            "• Smoother waves\n" +
-            "  - Fixed phantom zombies after resets\n" +
-            "  - Win condition more reliable\n" +
-            "• Major lag reduction\n" +
-            "  - Removed hundreds of per-frame\n" +
-            "    update loops across all scripts\n" +
-            "• Crash fixes\n" +
-            "  - Stale timers cancelled on cleanup\n\n" +
+            "=== UPDATE v26.0.0 (Apr 19) ===\n" +
+            "AI, SPAWN & HUD OVERHAUL\n\n" +
+            "• Smarter Zombies\n" +
+            "  - Speed, aggression & range\n" +
+            "    scale with wave number\n" +
+            "  - Chase last known position\n" +
+            "    for 8s after losing target\n" +
+            "  - Spread across players in\n" +
+            "    multiplayer (no pile-ons)\n" +
+            "• Spawn fix\n" +
+            "  - Bundles preload during lobby\n" +
+            "  - No more 0/N stuck waves\n" +
+            "• Proximity sensor fixed\n" +
+            "  - Left/right direction corrected\n" +
+            "• Local clock on HUD\n" +
+            "  - Bottom-right corner\n\n" +
             "HOLD THE LINE. BREAK YOUR RECORD."
         );
     }

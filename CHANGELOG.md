@@ -2,6 +2,31 @@
 
 ---
 
+## [26.0.0] — 2026-04-19
+
+### Zombie AI
+
+- **Zombie.ts** — Wave-scaled aggression: attack cooldown scales from 2500ms → 1700ms, attack range from 2.5m → 3.0m, brain tick rate from 200ms → 120ms across waves 1–30+.
+- **Zombie.ts** — Last-known-position pursuit: zombies chase the last seen position for 8 seconds after losing a target instead of immediately stopping.
+- **Zombie.ts** — Cooperative targeting: module-level `targetPressure` map tracks how many zombies are on each player. In multiplayer, zombies spread across all players instead of piling on one.
+
+### Spawn System
+
+- **SpawnManager.ts** — Root cause of `0/N` spawn hang identified and fixed: `dispose()` on a Loading controller cancelled the in-progress bundle download, preventing the cache from populating. Each retry started a fresh download that also got cancelled — infinite loop.
+- **SpawnManager.ts** — `startWave()` now keeps controllers in `Loaded`/`Loading` state instead of disposing all. Fresh controllers only created for remaining slots, with `load()` called immediately.
+- **SpawnManager.ts** — `spawnNextBatch()` skips `load()` if controller is already `Loaded` (preloaded), going straight to `spawn()` for near-instant zombie appearance.
+- **SpawnManager.ts** — All fresh replacement controllers (timeout, error, recycle paths) now immediately call `load()` after creation to pre-warm for next use.
+- **SpawnManager.ts** — `preloadPool()` updated to guarantee all zombie variants are loaded (one controller per variant first, then random fill). Prevents cache misses on less common variants.
+- **WaveManager.ts** — `preloadPool()` called in `start()` so bundle downloads begin during lobby time, completing before wave 1 starts.
+
+### HUD
+
+- **HUD.ts** — Local clock added to bottom-right corner. 12-hour format with AM/PM. Updates every second. Interval properly cancelled in `dispose()`.
+- **HUD_ProximitySensor.ts** — Left/right direction inverted. Horizon's right vector points opposite to UI convention — swapped `sensorLeft`/`sensorRight` bindings to match actual threat direction.
+- **HUD.ts** — Version string updated to v26.0.0.
+
+---
+
 ## [25.1.0] — 2026-04-18
 
 ### Performance
