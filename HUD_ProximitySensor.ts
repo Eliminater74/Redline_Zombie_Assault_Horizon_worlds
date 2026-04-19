@@ -318,60 +318,70 @@ export class HUD_ProximitySensor {
   private updateSensorDirection(player: hz.Player, state: ProximityState) {
     try {
       const targetPos = state.lastThreatPos;
-      
+
       if (!targetPos || !state.isVisible) {
-        // Reset opacities if not visible
         this.sensorUp.set(0.05, [player]);
         this.sensorDown.set(0.05, [player]);
         this.sensorLeft.set(0.05, [player]);
         this.sensorRight.set(0.05, [player]);
         return;
       }
-      
+
       const playerPos = player.position.get();
       const playerRot = player.rotation.get();
-      
-      const dx = targetPos.x - playerPos.x;
-      const dz = targetPos.z - playerPos.z;
-      const lenSq = dx * dx + dz * dz;
 
-      if (lenSq < 0.001) return;
-      
-      const len = Math.sqrt(lenSq);
-      const dirX = dx / len;
-      const dirZ = dz / len;
-      
+      const dx = targetPos.x - playerPos.x;
+      const dy = targetPos.y - playerPos.y;
+      const dz = targetPos.z - playerPos.z;
+      const horizLenSq = dx * dx + dz * dz;
+
+      if (horizLenSq < 0.001) return;
+
+      // FIX: Recalculate distance every tick from player's current pos to last known
+      // threat pos. This keeps the displayed distance accurate as the player moves,
+      // even when no new proximity event has arrived yet.
+      const dist3d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      state.lastProximityDist = dist3d;
+      this.proximityDist.set(dist3d, [player]);
+
+      const horizLen = Math.sqrt(horizLenSq);
+      const dirX = dx / horizLen;
+      const dirZ = dz / horizLen;
+
       const forward = hz.Quaternion.mulVec3(playerRot, hz.Vec3.forward);
-      const right = hz.Quaternion.mulVec3(playerRot, hz.Vec3.right);
-      
+      const right   = hz.Quaternion.mulVec3(playerRot, hz.Vec3.right);
+
+      // Dot products: +1 = fully in that direction, 0 = perpendicular, -1 = opposite
       const forwardDot = dirX * forward.x + dirZ * forward.z;
-      const rightDot = dirX * right.x + dirZ * right.z;
-      
-      // Calculate angle...
+      const rightDot   = dirX * right.x   + dirZ * right.z;
+
       const angle = Math.atan2(rightDot, forwardDot) * (180 / Math.PI);
       this.proximityAngle.set(angle, [player]);
 
-      const distanceIntensity = Math.max(0, 1 - (state.lastProximityDist / 20));
-      
-      const now = Date.now();
-      const pulseSpeed = 150 - (distanceIntensity * 100); 
-      const pulse = (Math.sin(now / pulseSpeed) + 1) / 2; 
-      
-      const isForward = angle > -45 && angle < 45;
-      const isBehind = angle < -135 || angle > 135;
-      const isRight = angle >= 45 && angle <= 135;
-      const isLeft = angle <= -45 && angle >= -135;
+      // FIX: Use dot products as per-diamond strength for smooth blending.
+      // A threat at 45° now lights up BOTH adjacent diamonds proportionally
+      // instead of snapping to whichever 90° zone it falls in.
+      const fwd = Math.max(0, forwardDot);   // in front  → top    diamond
+      const bck = Math.max(0, -forwardDot);  // behind    → bottom diamond
+      const rgt = Math.max(0, rightDot);     // to right  → right  diamond
+      const lft = Math.max(0, -rightDot);    // to left   → left   diamond
 
-      const getOpacity = (active: boolean): number => {
-        if (!active) return 0.05; 
-        const baseIntensity = 0.3 + (distanceIntensity * 0.3);
-        return baseIntensity + (pulse * (0.4 + distanceIntensity * 0.3)); 
+      const distanceIntensity = Math.max(0, 1 - (dist3d / 20));
+      const now = Date.now();
+      const pulseSpeed = 150 - (distanceIntensity * 100);
+      const pulse = (Math.sin(now / pulseSpeed) + 1) / 2;
+
+      const getOpacity = (strength: number): number => {
+        if (strength < 0.05) return 0.05;
+        const base = 0.3 + (distanceIntensity * 0.3);
+        return Math.min(1.0, (base + pulse * (0.4 + distanceIntensity * 0.3)) * strength);
       };
-      
-      this.sensorUp.set(getOpacity(isBehind), [player]);   // Behind (Sensor Up?) - kept swap logic from before
-      this.sensorDown.set(getOpacity(isForward), [player]); // Forward
-      this.sensorLeft.set(getOpacity(isRight), [player]);   
-      this.sensorRight.set(getOpacity(isLeft), [player]);   
+
+      // FIX: Correct mapping — forward=top, behind=bottom, right=right, left=left
+      this.sensorUp.set(getOpacity(fwd),    [player]);
+      this.sensorDown.set(getOpacity(bck),  [player]);
+      this.sensorRight.set(getOpacity(rgt), [player]);
+      this.sensorLeft.set(getOpacity(lft),  [player]);
 
     } catch (e) { }
   }
