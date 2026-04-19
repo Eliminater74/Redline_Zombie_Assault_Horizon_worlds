@@ -145,10 +145,11 @@ export class HUD extends ui.UIComponent<typeof HUD> {
     const players = this.world.getPlayers();
     players.forEach(p => this.onPlayerJoin(p));
 
-    // Local clock — updates every second using the player's device time.
-    this.clockTime.set(new Date().toLocaleTimeString());
+    // Local clock — updates every second using the player's device time (12-hour format).
+    const getTime = () => new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+    this.clockTime.set(getTime());
     this.clockInterval = this.async.setInterval(() => {
-      this.clockTime.set(new Date().toLocaleTimeString());
+      this.clockTime.set(getTime());
     }, 1000);
   }
 
@@ -983,22 +984,40 @@ export class HUD extends ui.UIComponent<typeof HUD> {
     return ui.View({
       style: {
         position: 'absolute',
-        bottom: 8,
-        right: 32,
-        paddingTop: 4, paddingBottom: 4, paddingLeft: 10, paddingRight: 10,
-        backgroundColor: 'rgba(0,0,0,0.45)',
-        borderRadius: 8,
+        bottom: 12,
+        right: 28,
+        flexDirection: 'column',
+        alignItems: 'center',
+        backgroundColor: 'rgba(0,0,0,0.7)',
+        borderRadius: 12,
+        borderWidth: 2,
+        borderColor: '#00e5ff',
+        paddingTop: 6, paddingBottom: 6, paddingLeft: 14, paddingRight: 14,
       },
       children: [
+        // Label
+        ui.Text({
+          text: '🕐 LOCAL TIME',
+          style: {
+            fontSize: 11,
+            fontFamily: 'Roboto-Mono',
+            color: '#00e5ff',
+            letterSpacing: 2,
+            fontWeight: 'bold',
+            marginBottom: 2,
+          }
+        }),
+        // Time
         ui.Text({
           text: this.clockTime,
           style: {
-            fontSize: 18,
+            fontSize: 22,
             fontFamily: 'Roboto-Mono',
-            color: '#cccccc',
-            textShadowColor: '#000000',
-            textShadowOffset: [1, 1],
-            textShadowRadius: 2,
+            fontWeight: 'bold',
+            color: '#ffffff',
+            textShadowColor: '#00e5ff',
+            textShadowOffset: [0, 0],
+            textShadowRadius: 6,
           }
         })
       ]
