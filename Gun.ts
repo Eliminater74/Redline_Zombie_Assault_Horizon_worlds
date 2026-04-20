@@ -38,14 +38,15 @@ export class GunController extends hz.Component<typeof GunController> {
   // HORIZON BUG WORKAROUND: Timer/Interval race conditions after destroy — store handle to cancel in cleanup().
   private handshakeTimer: number | null = null;
   private reloadTimer: number | null = null;
+  private autoFireInterval: number | null = null;
   private shotSeq = 0;
 
   ammo = 0;
   totalAmmo = 0;
 
-  timeBetweenShots = 0;
   firing = false;
   holding = false;
+  private nextShotAllowedAt = 0;
 
   handedness = true;
   weapon!: WeaponData;
@@ -70,7 +71,6 @@ export class GunController extends hz.Component<typeof GunController> {
     this.connectCodeBlockEvent(this.entity, hz.CodeBlockEvents.OnGrabStart, this.grab.bind(this));
     this.connectCodeBlockEvent(this.entity, hz.CodeBlockEvents.OnGrabEnd,   this.letGo.bind(this));
 
-    this.connectLocalBroadcastEvent(hz.World.onPrePhysicsUpdate, this.preUpdate.bind(this));
     this.connectCodeBlockEvent(this.entity, hideLine, this.hideLine.bind(this));
 
     // ❗ DO NOT connect network events here (owner not yet valid)
@@ -156,6 +156,7 @@ export class GunController extends hz.Component<typeof GunController> {
       this.async.clearTimeout(this.reloadTimer);
       this.reloadTimer = null;
     }
+    this.stopAutoFireLoop();
   }
 
   // Check if owner is still valid
@@ -209,28 +210,10 @@ export class GunController extends hz.Component<typeof GunController> {
 
   letGo() {
     this.firing = false;
+    this.stopAutoFireLoop();
     this.holding = false;
     if (this.isOwnerValid()) {
       this.entity.as(hz.AttachableEntity).attachToPlayer(this.owner, hz.AttachablePlayerAnchor.Torso);
-    }
-  }
-
-  // -----------------------------------
-  preUpdate(data: { deltaTime: number }) {
-    if (!this.isOwnerValid()) return; // Safety: skip if owner left
-    
-    this.timeBetweenShots += data.deltaTime;
-
-    if (
-      this.holding &&
-      this.firing &&
-      this.weapon.auto &&
-      this.ammo > 0 &&
-      this.totalAmmo > 0 &&
-      this.timeBetweenShots >= this.weapon.shootDelayS
-    ) {
-      this.fire();
-      this.timeBetweenShots = 0;
     }
   }
 
@@ -248,6 +231,7 @@ export class GunController extends hz.Component<typeof GunController> {
     this.shootButton.registerCallback((_, down) => {
       if (!down) {
         this.firing = false;
+        this.stopAutoFireLoop();
         return;
       }
       this.triggerDown();
@@ -259,9 +243,12 @@ export class GunController extends hz.Component<typeof GunController> {
 
     this.firing = true; // Always enable auto-fire loop
 
-    if (this.ammo > 0 && this.timeBetweenShots >= this.weapon.shootDelayS) {
+    if (this.ammo > 0 && this.canFireNow()) {
       this.fire();
-      this.timeBetweenShots = 0;
+    }
+
+    if (this.weapon.auto) {
+      this.startAutoFireLoop();
       return;
     }
 
@@ -277,7 +264,9 @@ export class GunController extends hz.Component<typeof GunController> {
   // -----------------------------------
   fire() {
     if (!this.isLocal()) return;
+    if (!this.canFireNow()) return;
 
+    this.nextShotAllowedAt = Date.now() + this.weapon.shootDelayS * 1000;
     this.totalAmmo--;
     this.ammo--;
 
@@ -331,6 +320,7 @@ export class GunController extends hz.Component<typeof GunController> {
     if (this.totalAmmo === 0 || this.ammo < 0) return;
 
     this.firing = false;
+    this.stopAutoFireLoop();
     this.ammo = -1;
 
     // HORIZON BUG WORKAROUND: Audio double-play — always stop before play on AudioGizmo.
@@ -356,6 +346,39 @@ export class GunController extends hz.Component<typeof GunController> {
   reload() {
     this.ammo = this.weapon.magSize;
     this.sendHUD();
+  }
+
+  // -----------------------------------
+  private canFireNow(): boolean {
+    return Date.now() >= this.nextShotAllowedAt;
+  }
+
+  // HORIZON PERFORMANCE OPTIMIZATION: Avoid a per-weapon onPrePhysicsUpdate tick.
+  // Only run an interval while the trigger is actively held on automatic weapons.
+  private startAutoFireLoop(): void {
+    if (this.autoFireInterval !== null) return;
+    const intervalMs = Math.max(25, Math.floor(this.weapon.shootDelayS * 1000));
+    this.autoFireInterval = this.async.setInterval(() => {
+      if (!this.isOwnerValid() || !this.holding || !this.firing || !this.weapon.auto) {
+        this.stopAutoFireLoop();
+        return;
+      }
+      if (this.ammo <= 0 || this.totalAmmo <= 0) {
+        this.stopAutoFireLoop();
+        if (this.ammo === 0) this.pressReload();
+        return;
+      }
+      if (this.canFireNow()) {
+        this.fire();
+      }
+    }, intervalMs);
+  }
+
+  private stopAutoFireLoop(): void {
+    if (this.autoFireInterval !== null) {
+      this.async.clearInterval(this.autoFireInterval);
+      this.autoFireInterval = null;
+    }
   }
 
   // -----------------------------------

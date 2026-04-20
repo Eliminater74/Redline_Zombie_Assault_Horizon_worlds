@@ -2,7 +2,7 @@ import * as hz from 'horizon/core';
 import * as nav from 'horizon/navmesh';
 import * as uab from 'horizon/unity_asset_bundles';
 
-import { alivePlayers, alivePlayerIds, playerHealthMap, ignoredPlayerIds } from 'GameState';
+import { alivePlayers, alivePlayerIds, playerHealthMap, ignoredPlayerIds, playerLookupMap, playerPositionCache } from 'GameState';
 import { Events } from 'Events';
 import { ZombieNavigator } from 'ZombieNav';
 import { registerZombie, unregisterZombie, IUpdatable } from 'ZombieUpdateManager';
@@ -432,7 +432,7 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
           for (const p of alivePlayers) {
               // HORIZON BUG WORKAROUND: Vec3.distanceSquared() unsupported in HW runtime.
               // Using manual dot product instead. Do not revert.
-              const pPos = p.position.get();
+              const pPos = playerPositionCache.get(p.id) ?? p.position.get();
               const lodDx = pPos.x - myPos.x, lodDy = pPos.y - myPos.y, lodDz = pPos.z - myPos.z;
               const d = lodDx * lodDx + lodDy * lodDy + lodDz * lodDz;
               if (d < closestDistSq) closestDistSq = d;
@@ -461,7 +461,8 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
    * Prefers alive players, falls back to all players if none alive.
    */
   private getPotentialTargets(): hz.Player[] {
-      const source = alivePlayers.length > 0 ? alivePlayers : this.world.getPlayers();
+      const cachedPlayers = Array.from(playerLookupMap.values());
+      const source = alivePlayers.length > 0 ? alivePlayers : (cachedPlayers.length > 0 ? cachedPlayers : this.world.getPlayers());
       const filtered = source.filter(p => !ignoredPlayerIds.has(p.id));
       return filtered.length > 0 ? filtered : source;
   }
@@ -678,15 +679,16 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
     }
 
     // FIX: Immediately face the nearest player to prevent walking into walls
-    const players = this.world.getPlayers();
-    if (players.length > 0) {
+    const players = Array.from(playerLookupMap.values());
+    const sourcePlayers = players.length > 0 ? players : this.world.getPlayers();
+    if (sourcePlayers.length > 0) {
         let nearestPlayer = null as (hz.Player | null);
         let minDstSq = Infinity;
         const myPos = this.entity.position.get();
 
-        players.forEach(p => {
+        sourcePlayers.forEach(p => {
             // HORIZON BUG WORKAROUND: Using manual dot product for squared distance. Do not use .distanceSquared().
-            const pPos = p.position.get();
+            const pPos = playerPositionCache.get(p.id) ?? p.position.get();
             const dx = pPos.x - myPos.x, dy = pPos.y - myPos.y, dz = pPos.z - myPos.z;
             const d = dx * dx + dy * dy + dz * dz;
             if (d < minDstSq) {

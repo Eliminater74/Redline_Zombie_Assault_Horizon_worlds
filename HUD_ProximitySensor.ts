@@ -1,5 +1,6 @@
 import * as hz from 'horizon/core';
 import * as ui from 'horizon/ui';
+import { playerPositionCache } from 'GameState';
 
 type ProximityState = {
   lastProximityDist: number;
@@ -271,23 +272,34 @@ export class HUD_ProximitySensor {
     if (!player) return;
     
     const world = this.parent.world;
-    const myPos = player.position.get();
+    const myPos = playerPositionCache.get(player.id) ?? player.position.get();
     const serverPlayerId = world.getServerPlayer().id;
-    const allPlayers = world.getPlayers();
+    const hasSnapshotCache = playerPositionCache.size > 0;
     
     let closestDist = 999;
     let closestPos: hz.Vec3 | null = null;
     
-    for (const p of allPlayers) {
-      if (p.id === player.id || p.id === serverPlayerId) continue;
-      
-      const pPos = p.position.get();
-      // HORIZON BUG WORKAROUND: Vec3.distance()/distanceSquared() broken in HW — use manual dot product.
-      const _dx = pPos.x - myPos.x, _dy = pPos.y - myPos.y, _dz = pPos.z - myPos.z;
-      const dist = Math.sqrt(_dx * _dx + _dy * _dy + _dz * _dz);
-      if (dist < closestDist) {
-        closestDist = dist;
-        closestPos = pPos;
+    if (hasSnapshotCache) {
+      playerPositionCache.forEach((pPos, otherPlayerId) => {
+        if (otherPlayerId === player.id || otherPlayerId === serverPlayerId) return;
+        // HORIZON BUG WORKAROUND: Vec3.distance()/distanceSquared() broken in HW — use manual dot product.
+        const _dx = pPos.x - myPos.x, _dy = pPos.y - myPos.y, _dz = pPos.z - myPos.z;
+        const dist = Math.sqrt(_dx * _dx + _dy * _dy + _dz * _dz);
+        if (dist < closestDist) {
+          closestDist = dist;
+          closestPos = pPos;
+        }
+      });
+    } else {
+      for (const p of world.getPlayers()) {
+        if (p.id === player.id || p.id === serverPlayerId) continue;
+        const pPos = p.position.get();
+        const _dx = pPos.x - myPos.x, _dy = pPos.y - myPos.y, _dz = pPos.z - myPos.z;
+        const dist = Math.sqrt(_dx * _dx + _dy * _dy + _dz * _dz);
+        if (dist < closestDist) {
+          closestDist = dist;
+          closestPos = pPos;
+        }
       }
     }
     

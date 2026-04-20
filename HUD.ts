@@ -1,6 +1,7 @@
 import * as hz from 'horizon/core';
 import * as ui from 'horizon/ui';
 import { Events } from 'Events';
+import { playerLookupMap } from 'GameState';
 import { HUD_ProximitySensor } from './HUD_ProximitySensor';
 import { HUD_KillFeed } from './HUD_KillFeed';
 import { HUD_PlayerList } from './HUD_PlayerList';
@@ -565,7 +566,10 @@ export class HUD extends ui.UIComponent<typeof HUD> {
       // SERVER-SIDE PLAYER RESOLUTION
       if (!data.targetId) return;
 
-      const player = this.world.getPlayers().find(p => String(p.id) === data.targetId);
+      const playerId = Number(data.targetId);
+      const player = Number.isNaN(playerId)
+        ? null
+        : (playerLookupMap.get(playerId) ?? this.world.getPlayers().find(p => p.id === playerId) ?? null);
       if (player) {
            this.proximitySensor.onZombieProximity(data, player);
       }

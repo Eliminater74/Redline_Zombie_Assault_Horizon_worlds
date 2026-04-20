@@ -3,7 +3,16 @@ import { Events } from 'Events';
 import { zombieAttackSFXs, zombieDeathSFXs, zombieMoanSFXs, playZombieDeath, playZombieMoan, playZombieHit } from 'ZombieSoundManager';
 import { GameConfig } from 'GameConfig';
 
-import { alivePlayers, alivePlayerIds, playerHealthMap, ignoredPlayerIds, setAlivePlayers } from 'GameState';
+import {
+  alivePlayers,
+  alivePlayerIds,
+  playerHealthMap,
+  ignoredPlayerIds,
+  setAlivePlayers,
+  updatePlayerSnapshot,
+  removePlayerSnapshot,
+  clearPlayerSnapshots,
+} from 'GameState';
 import { PersistenceManager } from 'PersistenceManager';
 
 
@@ -60,6 +69,7 @@ class PlayerManager extends hz.Component<typeof PlayerManager> {
   private playerIdleTime = new Map<number, number>();
   private afkCheckTimer: number | null = null;
   private playerListTimer: number | null = null;
+  private playerSnapshotTimer: number | null = null;
 
   // COMBO SYSTEM (Restored)
   private playerLastKillTime = new Map<number, number>();
@@ -97,8 +107,13 @@ class PlayerManager extends hz.Component<typeof PlayerManager> {
       this.async.clearInterval(this.playerListTimer);
       this.playerListTimer = null;
     }
+    if (this.playerSnapshotTimer !== null) {
+      this.async.clearInterval(this.playerSnapshotTimer);
+      this.playerSnapshotTimer = null;
+    }
     this.pendingTimers.forEach(t => this.async.clearTimeout(t));
     this.pendingTimers = [];
+    clearPlayerSnapshots();
   }
 
 // ...
@@ -118,10 +133,34 @@ class PlayerManager extends hz.Component<typeof PlayerManager> {
 
     if (this.isServer()) {
         this.initialPlayers = this.world.getPlayers();
+        this.refreshPlayerSnapshots();
+        this.startPlayerSnapshotPolling();
         this.startPlayerListBroadcast();
     }
     
     this.setupEvents();
+  }
+
+  // HORIZON BUG WORKAROUND: Cache player wrappers/positions once on the server so
+  // HUD proximity and zombie AI don't each call world.getPlayers()/position.get() on their own timers.
+  private startPlayerSnapshotPolling(): void {
+    if (this.playerSnapshotTimer !== null) {
+      this.async.clearInterval(this.playerSnapshotTimer);
+    }
+    this.playerSnapshotTimer = this.async.setInterval(() => {
+      this.refreshPlayerSnapshots();
+    }, 100);
+  }
+
+  private refreshPlayerSnapshots(): void {
+    for (const player of this.world.getPlayers()) {
+      try {
+        if (!player.isValidReference.get()) continue;
+        updatePlayerSnapshot(player, player.position.get());
+      } catch (e) {
+        // Ignore transient invalid references; the next poll will correct the cache.
+      }
+    }
   }
 
   private setupEvents() {
@@ -576,6 +615,9 @@ class PlayerManager extends hz.Component<typeof PlayerManager> {
 
   playerEnter(player: hz.Player) {
     player.sprintMultiplier.set(1);
+    try {
+      updatePlayerSnapshot(player, player.position.get());
+    } catch (e) { /* ignore invalid early join references */ }
 
     if (this.isServer()) {
         if (!this.initialPlayers.some(p => p.id === player.id)) {
@@ -663,6 +705,7 @@ class PlayerManager extends hz.Component<typeof PlayerManager> {
 
   playerExit(player: hz.Player) {
     if (!this.isServer()) return;
+    removePlayerSnapshot(player.id);
 
     // SAVE PROGRESS: Wave Leaderboard & Persistence
     try {
