@@ -29,20 +29,22 @@ class AmmoBox extends hz.Component<typeof AmmoBox> {
   }
 
   start(): void {
-    // Horizon replication bug: entities with visible=false in the prefab sometimes don't
-    // propagate the initial visible=true to all clients before they render the entity.
-    // Re-sending at 250ms/750ms/1500ms ensures every client catches at least one update.
+    // Horizon replication bug: same-value visible.set(true) calls are no-ops — Horizon
+    // deduplicates property sets and skips the replication packet if the value hasn't changed.
+    // Toggle false→true forces a genuine state change each time, guaranteeing a new packet goes out.
     this.entity.visible.set(true);
     const forceVisible = () => {
       try {
         if (!this.isCollected && this.entity.isValidReference.get()) {
+          this.entity.visible.set(false);
           this.entity.visible.set(true);
         }
       } catch {}
     };
-    this.visTimers.push(this.async.setTimeout(forceVisible, 250));
-    this.visTimers.push(this.async.setTimeout(forceVisible, 750));
-    this.visTimers.push(this.async.setTimeout(forceVisible, 1500));
+    this.visTimers.push(this.async.setTimeout(forceVisible, 100));
+    this.visTimers.push(this.async.setTimeout(forceVisible, 500));
+    this.visTimers.push(this.async.setTimeout(forceVisible, 2000));
+    this.visTimers.push(this.async.setTimeout(forceVisible, 5000));
 
     // 1. Trigger Logic
     if (this.props.trigger) {

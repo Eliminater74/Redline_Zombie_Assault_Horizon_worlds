@@ -584,9 +584,9 @@ class WaveManager extends hz.Component<typeof WaveManager> {
           }
           entities.forEach(e => {
             if (e) {
-              // Force visible immediately — prefab default is false, and AmmoBox.start()
-              // may not replicate fast enough to avoid a blank flash on clients.
-              try { e.visible.set(true); } catch {}
+              // Toggle false→true forces a replication packet even if AmmoBox.start()
+              // already set visible=true (same-value sets are deduped by Horizon).
+              try { e.visible.set(false); e.visible.set(true); } catch {}
               this.spawnedAmmo.push(e);
             }
           });
