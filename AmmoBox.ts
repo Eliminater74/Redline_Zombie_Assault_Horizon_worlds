@@ -17,6 +17,9 @@ class AmmoBox extends hz.Component<typeof AmmoBox> {
   private updateInterval: number | null = null;
   // One-shot timer to freeze physics after 3s (no need to check every frame).
   private kinematicTimer: number | null = null;
+  // Visibility retry timers — prefab starts visible=false and the first set doesn't
+  // always replicate to all clients before they render the entity.
+  private visTimers: number[] = [];
 
   private isServer(): boolean {
     try {
@@ -26,9 +29,20 @@ class AmmoBox extends hz.Component<typeof AmmoBox> {
   }
 
   start(): void {
-    // Ensure visibility — prefab may have visible=false set in the editor to hide it at origin on load.
-    // Without this, the entity spawns invisible and stays that way until Horizon forces a replication sync.
+    // Horizon replication bug: entities with visible=false in the prefab sometimes don't
+    // propagate the initial visible=true to all clients before they render the entity.
+    // Re-sending at 250ms/750ms/1500ms ensures every client catches at least one update.
     this.entity.visible.set(true);
+    const forceVisible = () => {
+      try {
+        if (!this.isCollected && this.entity.isValidReference.get()) {
+          this.entity.visible.set(true);
+        }
+      } catch {}
+    };
+    this.visTimers.push(this.async.setTimeout(forceVisible, 250));
+    this.visTimers.push(this.async.setTimeout(forceVisible, 750));
+    this.visTimers.push(this.async.setTimeout(forceVisible, 1500));
 
     // 1. Trigger Logic
     if (this.props.trigger) {
@@ -71,6 +85,8 @@ class AmmoBox extends hz.Component<typeof AmmoBox> {
       this.async.clearTimeout(this.kinematicTimer);
       this.kinematicTimer = null;
     }
+    this.visTimers.forEach(t => this.async.clearTimeout(t));
+    this.visTimers = [];
   }
 
   private onNewWave(_data: { wave: number }): void {
