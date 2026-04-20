@@ -389,12 +389,13 @@ export class HUD_ProximitySensor {
         return Math.min(1.0, (base + pulse * (0.4 + distanceIntensity * 0.3)) * strength);
       };
 
-      // Correct mapping — forward=top, behind=bottom, right=right, left=left
-      // NOTE: right/left swapped to match Horizon's coordinate handedness.
+      // HORIZON BUG WORKAROUND: Keep sensor mapping in player view space.
+      // A target on the player's left must light the left indicator, and a target on
+      // the player's right must light the right indicator. Do not swap these bindings.
       this.sensorUp.set(getOpacity(fwd),    [player]);
       this.sensorDown.set(getOpacity(bck),  [player]);
-      this.sensorRight.set(getOpacity(lft), [player]);
-      this.sensorLeft.set(getOpacity(rgt),  [player]);
+      this.sensorRight.set(getOpacity(rgt), [player]);
+      this.sensorLeft.set(getOpacity(lft),  [player]);
 
     } catch (e) { }
   }
