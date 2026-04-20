@@ -38,6 +38,7 @@ export class GunController extends hz.Component<typeof GunController> {
   // HORIZON BUG WORKAROUND: Timer/Interval race conditions after destroy — store handle to cancel in cleanup().
   private handshakeTimer: number | null = null;
   private reloadTimer: number | null = null;
+  private shotSeq = 0;
 
   ammo = 0;
   totalAmmo = 0;
@@ -297,7 +298,10 @@ export class GunController extends hz.Component<typeof GunController> {
 
     // AI: Broadcast gunshot for zombie sound awareness
     this.sendNetworkBroadcastEvent(Events.gunshot, { 
-        pos: this.props.rayBullet?.position.get() ?? this.entity.position.get()
+        pos: this.props.rayBullet?.position.get() ?? this.entity.position.get(),
+        // HORIZON BUG WORKAROUND: Network broadcasts can arrive out of order.
+        // Tag combat-adjacent events with a monotonic sequence number so receivers can ignore stale packets.
+        seq: ++this.shotSeq,
     });
 
     (this.handedness ? this.owner.rightHand : this.owner.leftHand)
@@ -383,7 +387,10 @@ export class GunController extends hz.Component<typeof GunController> {
       this.sendNetworkEvent(result.target, Events.hitZombie, { 
           damage: this.weapon.damage,
           instigator: this.owner,
-          hitPos: result.hitPoint // Send hit position for Headshot calc
+          hitPos: result.hitPoint,
+          // HORIZON BUG WORKAROUND: Network broadcasts/events can arrive out of order.
+          // Tag each hit so Zombie.ts can ignore duplicate or stale damage packets.
+          seq: ++this.shotSeq,
       });
     }
 
@@ -433,4 +440,3 @@ hz.Component.register(GunController);
 // ---------------------------------------------------------------------------
 // WEAPONS
 // ---------------------------------------------------------------------------
-

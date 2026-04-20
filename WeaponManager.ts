@@ -32,8 +32,10 @@ class WeaponManager extends hz.Component<typeof WeaponManager> {
   
   // PRELOAD: Cached for faster subsequent spawns
   private bundleLoaded = false;
+  private preloader: hz.SpawnController | null = null;
   // HORIZON BUG WORKAROUND: Timer/Interval race conditions after destroy — store handle to cancel in cleanup().
   private watchdogInterval: number | null = null;
+  private retryTimers: number[] = [];
 
   /**
    * Checks if this script is running on the server.
@@ -64,14 +66,14 @@ class WeaponManager extends hz.Component<typeof WeaponManager> {
     
     // PRELOAD: Cache the weapon bundle for faster spawning
     if (this.props.weaponBundle) {
-      const preloader = new hz.SpawnController(
+      this.preloader = new hz.SpawnController(
         this.props.weaponBundle,
         hz.Vec3.zero,
         hz.Quaternion.one,
         hz.Vec3.one
       );
       
-      preloader.load().then(() => {
+      this.preloader.load().then(() => {
         this.bundleLoaded = true;
         // Spawn for existing players after preload
         this.spawnForExistingPlayers();
@@ -184,49 +186,57 @@ class WeaponManager extends hz.Component<typeof WeaponManager> {
           return;
         }
         
-        // ATTACH WEAPONS INSTANTLY
-        for (const root of rootEntities) {
-          const children = root.children.get();
-          
-          for (const child of children) {
-            try {
-              const childName = child.name.get().toLowerCase();
+        // HORIZON BUG WORKAROUND: Property .set() calls made in the same frame as spawn()
+        // may not replicate reliably to late joiners. Defer ownership/attachment to the next tick.
+        const configureTimer = this.async.setTimeout(() => {
+          const timerIndex = this.retryTimers.indexOf(configureTimer);
+          if (timerIndex > -1) this.retryTimers.splice(timerIndex, 1);
+          try {
+            for (const root of rootEntities) {
+              const children = root.children.get();
               
-              // Skip effect entities - they stay with their parent weapon
-              if (childName.includes('bullet') || childName.includes('spark') || childName.includes('line')) {
-                child.owner.set(player);
-                continue;
-              }
-              
-              child.owner.set(player);
-              child.visible.set(true);
-
-              // NEW: Explicitly initialize the weapon (Fixes Race Condition)
-              this.sendNetworkEvent(child, Events.initializeWeapon, { player });
-              
-              try {
-                const grabbable = child.as(hz.GrabbableEntity);
-                if (grabbable) {
-                  grabbable.setWhoCanGrab([player]);
+              for (const child of children) {
+                try {
+                  const childName = child.name.get().toLowerCase();
                   
-                  const attachable = child.as(hz.AttachableEntity);
-                  if (attachable) {
-                    attachable.attachToPlayer(player, hz.AttachablePlayerAnchor.Torso);
+                  // Skip effect entities - they stay with their parent weapon
+                  if (childName.includes('bullet') || childName.includes('spark') || childName.includes('line')) {
+                    child.owner.set(player);
+                    continue;
                   }
+                  
+                  child.owner.set(player);
+                  child.visible.set(true);
+
+                  // NEW: Explicitly initialize the weapon (Fixes Race Condition)
+                  this.sendNetworkEvent(child, Events.initializeWeapon, { player });
+                  
+                  try {
+                    const grabbable = child.as(hz.GrabbableEntity);
+                    if (grabbable) {
+                      grabbable.setWhoCanGrab([player]);
+                      
+                      const attachable = child.as(hz.AttachableEntity);
+                      if (attachable) {
+                        attachable.attachToPlayer(player, hz.AttachablePlayerAnchor.Torso);
+                      }
+                    }
+                  } catch (e) {
+                    // Not grabbable/attachable, that's fine
+                  }
+                } catch (e) {
+                  console.error(`[WeaponManager] Error attaching child: ${e}`);
                 }
-              } catch (e) {
-                // Not grabbable/attachable, that's fine
               }
-            } catch (e) {
-              console.error(`[WeaponManager] Error attaching child: ${e}`);
+              
+              root.owner.set(player);
             }
+          } finally {
+            // Success! Clear spawning flag
+            this.spawningPlayers.delete(player.id);
           }
-          
-          root.owner.set(player);
-        }
-        
-        // Success! Clear spawning flag
-        this.spawningPlayers.delete(player.id);
+        }, 0);
+        this.retryTimers.push(configureTimer);
       })
       .catch((e) => {
         console.error(`[WeaponManager] Spawn failed for ${player.name.get()}: ${e}`);
@@ -236,11 +246,14 @@ class WeaponManager extends hz.Component<typeof WeaponManager> {
         // RETRY: Schedule a retry if under max attempts
         const currentAttempts = this.spawnAttempts.get(player.id) || 0;
         if (currentAttempts < this.MAX_SPAWN_ATTEMPTS && player.isValidReference.get()) {
-          this.async.setTimeout(() => {
+          const retryTimer = this.async.setTimeout(() => {
+            const timerIndex = this.retryTimers.indexOf(retryTimer);
+            if (timerIndex > -1) this.retryTimers.splice(timerIndex, 1);
             // BUG FIX: Re-check at fire time — player may have left during the 500ms window.
             if (!player.isValidReference.get()) return;
             this.spawnWeaponsForPlayer(player);
           }, 500);
+          this.retryTimers.push(retryTimer);
         }
       });
   }
@@ -267,6 +280,19 @@ class WeaponManager extends hz.Component<typeof WeaponManager> {
       this.async.clearInterval(this.watchdogInterval);
       this.watchdogInterval = null;
     }
+    this.retryTimers.forEach(timer => this.async.clearTimeout(timer));
+    this.retryTimers = [];
+    if (this.preloader !== null) {
+      try { this.preloader.dispose(); } catch (e) { /* ignore */ }
+      this.preloader = null;
+    }
+    this.playerControllers.forEach(sc => {
+      try {
+        sc.unload();
+        sc.dispose();
+      } catch (e) { /* ignore */ }
+    });
+    this.playerControllers.clear();
   }
 
   /**

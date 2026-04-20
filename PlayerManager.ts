@@ -34,11 +34,14 @@ class PlayerManager extends hz.Component<typeof PlayerManager> {
 
   // --- STATE ---
   private initialPlayers: hz.Player[] = [];
-  private playerHealth = new Map<hz.Player, number>();
+  // HORIZON BUG WORKAROUND: Player wrappers can differ across events/respawns.
+  // Key health by player ID instead of hz.Player object identity so damage/heal never misses.
+  private playerHealth = new Map<number, number>();
   private playerKills = new Map<number, number>(); // Track kills by ID
   private playerHeadshots = new Map<number, number>(); // Track headshots by ID
   private playerVisits = new Map<number, number>(); // Track visits by ID
   private playerHighestWave = new Map<number, number>(); // Track highest wave by ID
+  private processedZombieDeathSeq = new Map<string, number>();
   // NOTE: Sound arrays now imported from ZombieSoundManager
   private aliveSpawnPoints: hz.Entity[] = []; // Array for random spawns
   
@@ -68,6 +71,20 @@ class PlayerManager extends hz.Component<typeof PlayerManager> {
 
   private isServer(): boolean {
     return this.entity.owner.get().id === this.world.getServerPlayer().id;
+  }
+
+  private getPlayerHealth(player: hz.Player): number | undefined {
+    return this.playerHealth.get(player.id);
+  }
+
+  private setPlayerHealth(player: hz.Player, health: number): void {
+    this.playerHealth.set(player.id, health);
+    playerHealthMap.set(player.id, health);
+  }
+
+  private clearPlayerState(player: hz.Player): void {
+    this.playerHealth.delete(player.id);
+    playerHealthMap.delete(player.id);
   }
 
   // HORIZON BUG WORKAROUND: Timer/Interval race conditions after destroy — cancel all timers in cleanup().
@@ -227,7 +244,7 @@ class PlayerManager extends hz.Component<typeof PlayerManager> {
       });
   }
 
-  onZombieDeath(data: { zombie: hz.Entity, killer?: hz.Player }) {
+  onZombieDeath(data: { zombie: hz.Entity, killer?: hz.Player, seq?: number }) {
       // 1. Play Sound (Run on Client & Server) - always play, don't check playing flag
       try {
           const pos = data.zombie?.position?.get() ?? hz.Vec3.zero;
@@ -239,6 +256,12 @@ class PlayerManager extends hz.Component<typeof PlayerManager> {
 
       if (!this.isServer()) return;
       if (!this.playing) return;
+      const deathKey = data.zombie?.id?.toString?.() ?? '';
+      if (deathKey && data.seq !== undefined) {
+          const lastSeq = this.processedZombieDeathSeq.get(deathKey) ?? 0;
+          if (data.seq <= lastSeq) return;
+          this.processedZombieDeathSeq.set(deathKey, data.seq);
+      }
       
       if (!data.killer) return;
 
@@ -357,7 +380,7 @@ class PlayerManager extends hz.Component<typeof PlayerManager> {
         playerHealthMap.clear();
         alivePlayers.forEach(p => {
             alivePlayerIds.add(p.id);
-            playerHealthMap.set(p.id, 10); // Full health at game start
+            this.setPlayerHealth(p, 20); // Full health at game start
             // console.log(`[PlayerManager] Added to alivePlayers: ${p.name.get()} (ID: ${p.id})`);
         });
         // console.log(`[PlayerManager] Total alivePlayers: ${alivePlayers.length}`);
@@ -391,8 +414,7 @@ class PlayerManager extends hz.Component<typeof PlayerManager> {
         this.aliveSpawnPoints[rand].as(hz.SpawnPointGizmo)?.teleportPlayer(player);
     }
     // this.props.aliveSpawn?.as(hz.SpawnPointGizmo)?.teleportPlayer(player); // Deprecated
-    this.playerHealth.set(player, 20);
-    playerHealthMap.set(player.id, 20);
+    this.setPlayerHealth(player, 20);
     
     if (this.props.HUD) {
         this.sendNetworkEvent(this.props.HUD, Events.viewHealth, { health: 20, player });
@@ -401,21 +423,19 @@ class PlayerManager extends hz.Component<typeof PlayerManager> {
 
   healPlayer(data: { amount: number; player: hz.Player }) {
     if (!this.playing) return;
-    const hp = this.playerHealth.get(data.player);
+    const hp = this.getPlayerHealth(data.player);
     if (hp === undefined || hp <= 0) return; 
     const newHP = Math.min(20, hp + data.amount);
-    this.playerHealth.set(data.player, newHP);
-    playerHealthMap.set(data.player.id, newHP);
+    this.setPlayerHealth(data.player, newHP);
     if (this.props.HUD) this.sendNetworkEvent(this.props.HUD, Events.viewHealth, { health: newHP, player: data.player });
   }
 
   hitPlayer(data: { player: hz.Player; pos: hz.Vec3 }) {
     if (!this.playing) return; 
-    const hp = this.playerHealth.get(data.player);
+    const hp = this.getPlayerHealth(data.player);
     if (hp === undefined) return;
-    const newHP = hp - 1;
-    this.playerHealth.set(data.player, newHP);
-    playerHealthMap.set(data.player.id, newHP);
+    const newHP = Math.max(0, hp - 1);
+    this.setPlayerHealth(data.player, newHP);
     if (this.props.HUD) this.sendNetworkEvent(this.props.HUD, Events.viewHealth, { health: newHP, player: data.player });
     // Play hit sound at player position
     playZombieHit(data.player.position.get());
@@ -447,8 +467,7 @@ class PlayerManager extends hz.Component<typeof PlayerManager> {
 
     setAlivePlayers(alivePlayers.filter(p => p.id !== player.id));
     alivePlayerIds.delete(player.id);
-    this.playerHealth.delete(player);
-    playerHealthMap.delete(player.id);
+    this.clearPlayerState(player);
     this.checkForEnd();
   }
 
@@ -466,8 +485,7 @@ class PlayerManager extends hz.Component<typeof PlayerManager> {
     // Remove from alive players
     setAlivePlayers(alivePlayers.filter(p => p.id !== player.id));
     alivePlayerIds.delete(player.id);
-    this.playerHealth.delete(player);
-    playerHealthMap.delete(player.id);
+    this.clearPlayerState(player);
     this.checkForEnd();
   }
 
@@ -651,11 +669,12 @@ class PlayerManager extends hz.Component<typeof PlayerManager> {
         PersistenceManager.saveWave(this.world, player, this.currentWave);
     } catch(e) { console.error("Failed to save on exit", e); }
 
-    this.playerHealth.delete(player);
+    this.playerHealth.delete(player.id);
     this.playerKills.delete(player.id); // Clean up
     setAlivePlayers(alivePlayers.filter(p => p.id !== player.id));
     alivePlayerIds.delete(player.id);
     this.initialPlayers = this.initialPlayers.filter(p => p.id !== player.id);
+    this.clearPlayerState(player);
     this.checkForEnd();
   }
 

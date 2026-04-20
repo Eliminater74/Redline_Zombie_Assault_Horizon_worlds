@@ -121,6 +121,7 @@ class WaveManager extends hz.Component<typeof WaveManager> {
 
   /** Ammo entities currently on the ground */
   private spawnedAmmo: hz.Entity[] = [];
+  private processedZombieDeathSeq = new Map<string, number>();
 
   
   // -------------------------------------------------------------------------
@@ -556,8 +557,14 @@ class WaveManager extends hz.Component<typeof WaveManager> {
    * 
    * @param data.zombie - The zombie entity that died
    */
-  zombieDeath(data: { zombie: hz.Entity, killer?: hz.Player }): void {
+  zombieDeath(data: { zombie: hz.Entity, killer?: hz.Player, seq?: number }): void {
     if (!this.isServer()) return;
+    const deathKey = data.zombie?.id?.toString?.() ?? '';
+    if (deathKey && data.seq !== undefined) {
+      const lastSeq = this.processedZombieDeathSeq.get(deathKey) ?? 0;
+      if (data.seq <= lastSeq) return;
+      this.processedZombieDeathSeq.set(deathKey, data.seq);
+    }
     const zombie = data.zombie;
 
     // If a zombie dies without a player killer (stuck/despawn/failsafe),

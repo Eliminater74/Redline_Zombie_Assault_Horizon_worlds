@@ -39,6 +39,7 @@ class LevelManager extends hz.Component<typeof LevelManager> {
   private playerXP = new Map<number, number>();
   private playerLevel = new Map<number, number>();
   private playersInGame = new Set<number>(); // Track who is in the current game
+  private processedZombieDeathSeq = new Map<string, number>();
   // HORIZON BUG WORKAROUND: Track one-shot join timers so cleanup() can cancel them.
   private pendingJoinTimers: number[] = [];
 
@@ -159,7 +160,13 @@ class LevelManager extends hz.Component<typeof LevelManager> {
   // EVENT HANDLERS
   // =========================================================================
 
-  private onZombieDeath(data: { zombie: hz.Entity, killer?: hz.Player }) {
+  private onZombieDeath(data: { zombie: hz.Entity, killer?: hz.Player, seq?: number }) {
+    const deathKey = data.zombie?.id?.toString?.() ?? '';
+    if (deathKey && data.seq !== undefined) {
+      const lastSeq = this.processedZombieDeathSeq.get(deathKey) ?? 0;
+      if (data.seq <= lastSeq) return;
+      this.processedZombieDeathSeq.set(deathKey, data.seq);
+    }
     if (!data.killer) return;
     this.awardXP(data.killer, LevelManager.XP_PER_KILL, "Kill");
   }

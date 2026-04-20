@@ -111,6 +111,11 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
   // is unloaded mid-attack, preventing callbacks from firing on a destroyed entity.
   private attackSpeedTimer: number | null = null;
   private attackDamageTimer: number | null = null;
+  private reviveCollisionTimer: number | null = null;
+  private reviveGraceUntil = 0;
+  private lastProcessedDamageSeq = 0;
+  private lastProcessedGunshotSeq = 0;
+  private deathSeq = 0;
 
   /** Timestamp of last proximity alert sent to HUD */
   private lastProximityCheckTime = 0;
@@ -216,8 +221,10 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
   // AI: SOUND AWARENESS
   // ============================================================================
 
-  private onGunshot(data: { pos: hz.Vec3 }): void {
+  private onGunshot(data: { pos: hz.Vec3, seq?: number }): void {
     if (!this.alive || !this.isServer()) return;
+    if (data.seq !== undefined && data.seq <= this.lastProcessedGunshotSeq) return;
+    if (data.seq !== undefined) this.lastProcessedGunshotSeq = data.seq;
 
     const myPos = this.entity.position.get();
     // HORIZON BUG WORKAROUND: Vec3.lengthSquared() / distanceSquared() unsupported in HW runtime.
@@ -254,6 +261,10 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
     if (this.attackDamageTimer !== null) {
       this.async.clearTimeout(this.attackDamageTimer);
       this.attackDamageTimer = null;
+    }
+    if (this.reviveCollisionTimer !== null) {
+      this.async.clearTimeout(this.reviveCollisionTimer);
+      this.reviveCollisionTimer = null;
     }
     this.setTarget(null);
     unregisterZombie(this);
@@ -739,16 +750,30 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
     this.alive = true;
     this.moving = true;
     this.isDead = false; // FIX: Ensure death flag is cleared on client
+    this.reviveGraceUntil = Date.now() + 100;
+    this.lastProcessedDamageSeq = 0;
     this.entity.visible.set(true);
 
-    // Enable collider
+    // HORIZON BUG WORKAROUND: Freshly spawned entities can have collision/raycast desync for 1-2 frames.
+    // Keep the collider disabled briefly, then enable it after a short grace period.
     try {
        const collider = this.props.collider as any;
-       // FIX: Validate collider entity before accessing properties
        if (collider && collider.isValidReference?.get() && !collider.as(hz.TriggerGizmo)) {
-          collider.collidable.set(true);
+          collider.collidable.set(false);
        }
     } catch(e) { /* Ignore invalid entity errors */ }
+    if (this.reviveCollisionTimer !== null) {
+      this.async.clearTimeout(this.reviveCollisionTimer);
+    }
+    this.reviveCollisionTimer = this.async.setTimeout(() => {
+      this.reviveCollisionTimer = null;
+      try {
+        const collider = this.props.collider as any;
+        if (this.alive && collider && collider.isValidReference?.get() && !collider.as(hz.TriggerGizmo)) {
+          collider.collidable.set(true);
+        }
+      } catch (e) { /* Ignore invalid entity errors */ }
+    }, 50);
 
     // Start animations
     this.animations?.setAnimationParameterBool("Moving", true);
@@ -771,9 +796,12 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
    * Called when this zombie takes damage.
    * Handles headshot detection, damage multipliers, and death triggering.
    */
-  hitZombie(data: { damage: number, instigator?: hz.Player, hitPos?: hz.Vec3 }): void {
+  hitZombie(data: { damage: number, instigator?: hz.Player, hitPos?: hz.Vec3, seq?: number }): void {
     if (!this.isServer()) return;
     if (!this.alive || this.isDead) return;
+    if (Date.now() < this.reviveGraceUntil) return;
+    if (data.seq !== undefined && data.seq <= this.lastProcessedDamageSeq) return;
+    if (data.seq !== undefined) this.lastProcessedDamageSeq = data.seq;
 
     // Switch target to attacker if they're a valid player
     if (data.instigator && alivePlayerIds.has(data.instigator!.id)) {
@@ -808,7 +836,7 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
     }
 
     // Apply damage
-    this.currentHealth -= finalDamage;
+    this.currentHealth = Math.max(0, this.currentHealth - finalDamage);
 
     // Check for death
     if (this.currentHealth <= 0) {
@@ -879,7 +907,10 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
     this.sendNetworkBroadcastEvent(Events.zombieDeath, {
         zombie: this.entity,
         killer: killer,
-        deathPos: this.entity.position.get()
+        deathPos: this.entity.position.get(),
+        // HORIZON BUG WORKAROUND: Broadcast ordering is not guaranteed.
+        // A per-zombie death sequence lets listeners ignore duplicate or stale death packets.
+        seq: ++this.deathSeq,
     });
   }
 

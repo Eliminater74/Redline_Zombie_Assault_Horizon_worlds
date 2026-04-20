@@ -4,8 +4,8 @@ export const Events = {
   // --- ZOMBIE EVENTS ---
   queueZombie: new hz.LocalEvent<{ zombie: hz.Entity, health?: number, speed?: number, wave?: number }>('queueZombie'),
   reviveZombie: new hz.NetworkEvent<{ zombie: hz.Entity, health?: number, speed?: number, wave?: number, position?: hz.Vec3 }>('reviveZombie'),
-  zombieDeath: new hz.NetworkEvent<{ zombie: hz.Entity, killer?: hz.Player, deathPos?: hz.Vec3 }>('zombieDeath'),
-  hitZombie: new hz.NetworkEvent<{ damage: number, instigator?: hz.Player, hitPos?: hz.Vec3 }>('hitZombie'),
+  zombieDeath: new hz.NetworkEvent<{ zombie: hz.Entity, killer?: hz.Player, deathPos?: hz.Vec3, seq?: number }>('zombieDeath'),
+  hitZombie: new hz.NetworkEvent<{ damage: number, instigator?: hz.Player, hitPos?: hz.Vec3, seq?: number }>('hitZombie'),
   zombieHitAnim: new hz.NetworkEvent<{ zombie: hz.Entity }>('zombieHitAnim'),
   attackSFX: new hz.NetworkEvent<{ pos: hz.Vec3 }>('attackSFX'),
   playerHeadshot: new hz.LocalEvent<{ player: hz.Player }>("playerHeadshot"), // Server-side notification
@@ -19,7 +19,7 @@ export const Events = {
   initFloatingDamage: new hz.NetworkEvent<{ amount: number, isHeadshot: boolean }>('initFloatingDamage'),
 
   // --- ZOMBIE AI EVENTS ---
-  gunshot: new hz.NetworkEvent<{ pos: hz.Vec3 }>('gunshot'), // Sound awareness for zombies (Network so client->server works)
+  gunshot: new hz.NetworkEvent<{ pos: hz.Vec3, seq?: number }>('gunshot'), // Sound awareness for zombies (Network so client->server works)
   zombieMoan: new hz.LocalEvent<{ pos: hz.Vec3 }>('zombieMoan'), // Random zombie ambient sounds
 
   // --- GAME LOOP EVENTS ---
