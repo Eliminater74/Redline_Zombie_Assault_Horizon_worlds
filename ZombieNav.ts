@@ -11,6 +11,14 @@ import * as nav from 'horizon/navmesh';
 export class ZombieNavigator {
   // CONFIGURATION
   private readonly destCacheThresholdSq = 0.25; // 0.5m tolerance (Was 4.0/2m)
+  private readonly stuckCheckIntervalMs = 1500;
+  private readonly stuckMovementThreshold = 0.08;
+  private readonly stuckSpeedThreshold = 0.12;
+  private readonly unstuckDirectChaseMs = 5000;
+  private readonly hopelessStuckAttemptLimit = 24;
+  private readonly longTermStuckWindowMs = 120000;
+  private readonly longTermStuckDistanceThreshold = 1.5;
+  private readonly longTermStuckHitLimit = 5;
   
   // COMPONENTS
   private agent: nav.NavMeshAgent;
@@ -46,7 +54,7 @@ export class ZombieNavigator {
   private directChaseUntil = 0;
 
   public get isHopelesslyStuck(): boolean {
-      return this.stuckAttempts > 10 || this.forceStuck; // Check both counters
+      return this.stuckAttempts > this.hopelessStuckAttemptLimit || this.forceStuck; // Check both counters
   }
   
   // FAILSAFE FLAG
@@ -249,34 +257,58 @@ export class ZombieNavigator {
           }
       }
 
-      const sideSign = Math.random() < 0.5 ? -1 : 1;
-      const sideX = -dirZ * sideSign;
-      const sideZ = dirX * sideSign;
+      // HORIZON NAV WORKAROUND: Try multiple side-step candidates before giving up.
+      // Zombies often wedge into corners or props with a valid path slightly to the left/right.
+      const sideStep = 1.4 + Math.random() * 1.0;
+      const backStep = 0.6 + Math.random() * 0.7;
+      const forwardStep = 0.8 + Math.random() * 0.6;
+      const strafeBias = Math.random() < 0.5 ? -1 : 1;
 
-      const sideStep = 1.3 + Math.random() * 0.9;
-      const backStep = 0.5 + Math.random() * 0.6;
+      const candidates = [
+          new hz.Vec3(
+              myPos.x + (-dirZ * strafeBias) * sideStep - dirX * backStep,
+              myPos.y,
+              myPos.z + (dirX * strafeBias) * sideStep - dirZ * backStep,
+          ),
+          new hz.Vec3(
+              myPos.x + (-dirZ * -strafeBias) * sideStep - dirX * backStep,
+              myPos.y,
+              myPos.z + (dirX * -strafeBias) * sideStep - dirZ * backStep,
+          ),
+          new hz.Vec3(
+              myPos.x - dirX * (backStep + 0.8),
+              myPos.y,
+              myPos.z - dirZ * (backStep + 0.8),
+          ),
+          new hz.Vec3(
+              myPos.x + (-dirZ * strafeBias) * (sideStep * 0.7) + dirX * forwardStep,
+              myPos.y,
+              myPos.z + (dirX * strafeBias) * (sideStep * 0.7) + dirZ * forwardStep,
+          ),
+      ];
 
-      const candidate = new hz.Vec3(
-          myPos.x + sideX * sideStep - dirX * backStep,
-          myPos.y,
-          myPos.z + sideZ * sideStep - dirZ * backStep,
-      );
-
-      const nearest = this.navMesh.getNearestPoint(candidate, 3.0);
+      let nearest: hz.Vec3 | null = null;
+      for (const candidate of candidates) {
+          const sampled = this.navMesh.getNearestPoint(candidate, 3.5);
+          if (sampled) {
+              nearest = sampled;
+              break;
+          }
+      }
       if (!nearest) return;
 
+      this.agent.clearDestination();
       this.agent.destination.set(nearest);
       this.cachedDestination = nearest;
       this.isUnstucking = true;
-      this.unstuckEndTime = now + 900;
-      this.directChaseUntil = now + 4000;
+      this.unstuckEndTime = now + 1100;
+      this.directChaseUntil = now + this.unstuckDirectChaseMs;
   }
 
   private checkIfStuck(now: number, target: hz.Player | null) {
       const hasTarget = target !== null;
 
-      // Check more frequently (1s)
-      if (now < this.lastStuckCheckTime + 1000) return;
+      if (now < this.lastStuckCheckTime + this.stuckCheckIntervalMs) return;
       
       const myPos = this.entity.position.get();
       if (this.lastStuckCheckPos) {
@@ -293,7 +325,7 @@ export class ZombieNavigator {
           // AGGRESSIVE STUCK CONDITION:
           // If trying to move (Speed > 0.05) OR Has Target
           // AND hasn't moved 0.1m in the last second (Was 0.3).
-          if ((currentSpeed > 0.05 || hasTarget) && dist < 0.1) {
+          if ((currentSpeed > this.stuckSpeedThreshold || hasTarget) && dist < this.stuckMovementThreshold) {
               this.stuckAttempts++;
               // Try a sidestep/backstep maneuver before escalating.
               if (this.stuckAttempts >= 3) {
@@ -312,7 +344,7 @@ export class ZombieNavigator {
       // LONG TERM STUCK CHECK (90 Seconds)
       // --------------------------------------------------------
       // Catches zombies that are "moving" (jittering/sliding) but not going anywhere.
-      if (!this.longTermStuckPos || now > this.longTermStuckTime + 90000) { // Increased from 30s
+      if (!this.longTermStuckPos || now > this.longTermStuckTime + this.longTermStuckWindowMs) {
           if (this.longTermStuckPos) {
               // HORIZON BUG WORKAROUND: Vec3.distance()/distanceSquared() broken in HW — use manual dot product.
               const _ltDx = myPos.x - this.longTermStuckPos.x;
@@ -324,11 +356,11 @@ export class ZombieNavigator {
               // console.log(`[ZombieNav] LongTerm Check (30s): NetDist=${netDist.toFixed(2)} vs Threshold=1.0`);
 
               // If trying to move but still in almost same area, try unstuck first.
-              if (isTryingToMove && netDist < 1.0) {
+              if (isTryingToMove && netDist < this.longTermStuckDistanceThreshold) {
                    this.longTermStuckHits++;
                    this.performUnstuck(now, target);
 
-                   if (this.longTermStuckHits >= 3) {
+                   if (this.longTermStuckHits >= this.longTermStuckHitLimit) {
                        console.log("[ZombieNav] LONG TERM STUCK (Persistent). KILLING. 💀");
                        this.forceStuck = true;
                    }
