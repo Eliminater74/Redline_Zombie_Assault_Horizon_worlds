@@ -1005,7 +1005,7 @@ export class HUD extends ui.UIComponent<typeof HUD> {
       children: [
         // Label
         ui.Text({
-          text: '🕐 LOCAL TIME',
+          text: '🕐 SERVER TIME',
           style: {
             fontSize: 11,
             fontFamily: 'Roboto-Mono',

@@ -85,12 +85,13 @@ export class SpawnManager {
      });
      this.controllerTimestamps.clear();
 
-     // Fill remaining slots with fresh controllers and begin loading them immediately.
+     // Fill remaining slots with fresh Unloaded controllers.
+     // spawnNextBatch() handles load() with a 90s timeout — pre-loading here has
+     // no timeout and hangs permanently if Horizon is syncing a mid-wave player join.
      while (this.controllers.length < targetPoolSize) {
          const sc = this.createFreshController();
          if (!sc) break;
          this.controllers.push(sc);
-         sc.load().catch(() => {});
      }
 
     // Kickstart
@@ -292,10 +293,8 @@ export class SpawnManager {
                     try { sc.dispose(); } catch {}
                     if (idx > -1) {
                         const fresh = this.createFreshController();
-                        if (fresh) {
-                            this.controllers[idx] = fresh;
-                            fresh.load().catch(() => {});
-                        } else this.controllers.splice(idx, 1);
+                        if (fresh) this.controllers[idx] = fresh;
+                        else this.controllers.splice(idx, 1);
                     }
                     this.notifyUpdate();
                     this.scheduleSpawnRetry(1000);
@@ -368,10 +367,8 @@ export class SpawnManager {
 						try { sc.dispose(); } catch {}
 						if (idx > -1) {
 							const fresh = this.createFreshController();
-							if (fresh) {
-                                this.controllers[idx] = fresh;
-                                fresh.load().catch(() => {});
-                            } else this.controllers.splice(idx, 1);
+							if (fresh) this.controllers[idx] = fresh;
+							else this.controllers.splice(idx, 1);
 						}
 						this.notifyUpdate();
 						this.scheduleSpawnRetry(1000);
@@ -517,10 +514,8 @@ export class SpawnManager {
       try { sc.dispose(); } catch {}
       if (idx > -1) {
           const fresh = this.createFreshController();
-          if (fresh) {
-              this.controllers[idx] = fresh;
-              fresh.load().catch(() => {}); // Pre-load so it's ready for the next spawn slot
-          } else this.controllers.splice(idx, 1);
+          if (fresh) this.controllers[idx] = fresh;
+          else this.controllers.splice(idx, 1);
       }
       this.spawnNextBatch();
   }
