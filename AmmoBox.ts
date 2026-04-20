@@ -1,5 +1,9 @@
 import * as hz from 'horizon/core';
 import { Events } from 'Events';
+import { registerTransientEntityUpdate, unregisterTransientEntityUpdate } from 'TransientEntityUpdateHub';
+
+const AMMO_BOX_TICK_MS = 100;
+const AMMO_BOX_PROXIMITY_CHECK_MS = 200;
 
 class AmmoBox extends hz.Component<typeof AmmoBox> {
   static propsDefinition = {
@@ -11,10 +15,6 @@ class AmmoBox extends hz.Component<typeof AmmoBox> {
   private isCollected = false;
   private isDespawning = false;
   private lastDistanceCheck = 0;
-
-  // PERF FIX: Replaced World.onUpdate (60 FPS per instance) with a 50ms setInterval.
-  // With 60 ammo boxes on the ground, onUpdate was firing 3600 times/sec just for rotation.
-  private updateInterval: number | null = null;
   // One-shot timer to freeze physics after 3s (no need to check every frame).
   private kinematicTimer: number | null = null;
   // Visibility retry timers — prefab starts visible=false and the first set doesn't
@@ -61,8 +61,9 @@ class AmmoBox extends hz.Component<typeof AmmoBox> {
     this.connectNetworkBroadcastEvent(Events.despawnAmmo, this.onDespawnRequest.bind(this));
     this.connectNetworkBroadcastEvent(Events.forceCleanupAmmo, this.onForceCleanup.bind(this));
 
-    // 3. Animation + proximity at 20 FPS (50ms) instead of 60 FPS per instance.
-    this.updateInterval = this.async.setInterval(this.onTick.bind(this), 50);
+    // HORIZON PERFORMANCE OPTIMIZATION: Register with the shared transient entity tick hub
+    // instead of creating one interval per ammo box instance.
+    registerTransientEntityUpdate(this.entity.id.toString(), this, AMMO_BOX_TICK_MS, this.onTick.bind(this));
 
     // 4. Freeze physics after 3 seconds to stop the engine solving collisions for idle boxes.
     this.kinematicTimer = this.async.setTimeout(() => {
@@ -79,10 +80,7 @@ class AmmoBox extends hz.Component<typeof AmmoBox> {
 
   // HORIZON BUG WORKAROUND: Timer/Interval race conditions after destroy — cancel all timers in cleanup().
   cleanup(): void {
-    if (this.updateInterval !== null) {
-      this.async.clearInterval(this.updateInterval);
-      this.updateInterval = null;
-    }
+    unregisterTransientEntityUpdate(this.entity.id.toString());
     if (this.kinematicTimer !== null) {
       this.async.clearTimeout(this.kinematicTimer);
       this.kinematicTimer = null;
@@ -188,15 +186,15 @@ class AmmoBox extends hz.Component<typeof AmmoBox> {
         if (!this.entity.isValidReference.get()) return;
     } catch (e) { return; }
 
-    // Rotate (50ms interval = 0.05s delta equivalent)
+    // Rotate using the shared 100ms hub tick.
     try {
-        const rotChange = hz.Quaternion.fromAxisAngle(hz.Vec3.up, 0.05 * Math.PI);
+        const rotChange = hz.Quaternion.fromAxisAngle(hz.Vec3.up, 0.1 * Math.PI);
         this.entity.rotation.set(this.entity.rotation.get().mul(rotChange));
     } catch (e) { /* Entity is Static — stop rotating */ }
 
-    // Proximity pickup check throttled to every 200ms (every 4 ticks)
+    // Proximity pickup check throttled to every 200ms.
     const now = Date.now();
-    if (now - this.lastDistanceCheck < 200) return;
+    if (now - this.lastDistanceCheck < AMMO_BOX_PROXIMITY_CHECK_MS) return;
     this.lastDistanceCheck = now;
 
     try {

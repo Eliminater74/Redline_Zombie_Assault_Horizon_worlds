@@ -1,5 +1,8 @@
 import * as hz from 'horizon/core';
 import { Events } from 'Events';
+import { registerTransientEntityUpdate, unregisterTransientEntityUpdate } from 'TransientEntityUpdateHub';
+
+const HEALTH_PICKUP_TICK_MS = 100;
 
 class HealthPickup extends hz.Component<typeof HealthPickup> {
   static propsDefinition = {
@@ -9,9 +12,7 @@ class HealthPickup extends hz.Component<typeof HealthPickup> {
   };
 
   private isCollected = false;
-  // PERF FIX: Replaced World.onUpdate (60fps) with a 50ms interval (20fps) — spin animation only.
-  private updateInterval: number | null = null;
-  private static readonly TICK_DT = 0.05;
+  private static readonly TICK_DT = 0.1;
 
   start(): void {
     const targetTrigger = this.props.trigger ?? this.entity;
@@ -22,15 +23,14 @@ class HealthPickup extends hz.Component<typeof HealthPickup> {
       this.onPlayerEnter.bind(this)
     );
 
-    this.updateInterval = this.async.setInterval(() => this.onTick(), 50);
+    // HORIZON PERFORMANCE OPTIMIZATION: Use the shared transient entity tick hub
+    // so health drops don't each create their own interval.
+    registerTransientEntityUpdate(this.entity.id.toString(), this, HEALTH_PICKUP_TICK_MS, this.onTick.bind(this));
   }
 
   // HORIZON BUG WORKAROUND: Timer/Interval race conditions after destroy — cancel in cleanup().
   cleanup(): void {
-    if (this.updateInterval !== null) {
-      this.async.clearInterval(this.updateInterval);
-      this.updateInterval = null;
-    }
+    unregisterTransientEntityUpdate(this.entity.id.toString());
   }
 
   private onPlayerEnter(player: hz.Player): void {

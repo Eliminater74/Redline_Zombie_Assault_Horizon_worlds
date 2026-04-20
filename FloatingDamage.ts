@@ -1,5 +1,8 @@
 import * as hz from 'horizon/core';
 import { Events } from 'Events';
+import { registerTransientEntityUpdate, unregisterTransientEntityUpdate } from 'TransientEntityUpdateHub';
+
+const FLOATING_DAMAGE_TICK_MS = 100;
 
 class FloatingDamage extends hz.Component<typeof FloatingDamage> {
   static propsDefinition = {
@@ -12,9 +15,6 @@ class FloatingDamage extends hz.Component<typeof FloatingDamage> {
   private initialized = false;
   private lifeTime = 1500; // ms
 
-  // PERF FIX: Replaced World.onUpdate (60 FPS per instance) with a 50ms setInterval.
-  // Dozens of simultaneous damage numbers were adding dozens of per-frame listeners.
-  private floatInterval: number | null = null;
   // BUG FIX: Store both timeout handles so cleanup() can cancel them.
   private safetyTimer: number | null = null;
   private destroyTimer: number | null = null;
@@ -41,10 +41,7 @@ class FloatingDamage extends hz.Component<typeof FloatingDamage> {
 
   // HORIZON BUG WORKAROUND: Timer/Interval race conditions after destroy — cancel all timers in cleanup().
   cleanup(): void {
-    if (this.floatInterval !== null) {
-      this.async.clearInterval(this.floatInterval);
-      this.floatInterval = null;
-    }
+    unregisterTransientEntityUpdate(this.entity.id.toString());
     if (this.safetyTimer !== null) {
       this.async.clearTimeout(this.safetyTimer);
       this.safetyTimer = null;
@@ -90,8 +87,9 @@ class FloatingDamage extends hz.Component<typeof FloatingDamage> {
         }
     } catch(e) {}
 
-    // Start float animation at 20 FPS — smooth enough for a 1.5s effect.
-    this.floatInterval = this.async.setInterval(this.onTick.bind(this), 50);
+    // HORIZON PERFORMANCE OPTIMIZATION: Use the shared transient entity tick hub
+    // instead of one interval per floating number.
+    registerTransientEntityUpdate(this.entity.id.toString(), this, FLOATING_DAMAGE_TICK_MS, this.onTick.bind(this));
 
     // Schedule deletion on server side.
     if (this.isServer()) {
