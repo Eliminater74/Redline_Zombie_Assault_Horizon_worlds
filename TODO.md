@@ -14,6 +14,23 @@
 - [x] **Kill counter** — moved from `bottom:110` to `bottom:0` since ammo vacated bottom-left
 - [x] **Health bar** — widened from 33% to 45% of screen
 
+### Noesis UI Migration (large effort — doable)
+
+Horizon Worlds has Noesis UI built into the editor. Migrating from `horizon/ui` to Noesis would give access to full XAML-based UI with WPF-style controls, animations, and data templates.
+
+**What stays the same:** all game logic, event wiring, server-side data flow (SpawnManager, WaveManager, etc.)
+
+**What gets completely rewritten:**
+
+- All `ui.View` / `ui.Text` / `ui.Image` calls → XAML markup files
+- `ui.Binding<T>` reactive bindings → MVVM DataContext / `{Binding}` syntax
+- `ui.UIComponent` base class → Noesis-specific component base
+- Per-player binding scope (`binding.set(value, [player])`) → needs redesign since Noesis renders per-client, not server-scoped
+
+**Difficulty:** Large. Estimate full rewrite of all 5 HUD files (HUD.ts, HUD_KillFeed.ts, HUD_PlayerStats.ts, HUD_ProximitySensor.ts, HUD_PlayerList.ts) plus new XAML files for each panel. Game logic files untouched.
+
+- [ ] **Noesis UI migration** — rewrite HUD layer in XAML/Noesis. Prerequisite: test a single panel (e.g. wave counter) in Noesis first to confirm per-player data binding approach works.
+
 ### Ideas
 
 - [ ] **Session Timer** — "Time in session: 00:34:12". Could go next to clock.
