@@ -641,7 +641,7 @@ export class HUD extends ui.UIComponent<typeof HUD> {
         bottom: 0,
         left: '50%',
         layoutOrigin: [0.5, 0],
-        width: '33%',
+        width: '45%',
         height: 128,
         position: 'absolute',
       }
@@ -735,8 +735,8 @@ export class HUD extends ui.UIComponent<typeof HUD> {
     return ui.View({
       children: [this.ammoBarContainer(), this.ammoNumbers()],
       style: {
-        position: 'absolute', left: 32, bottom: 0, height: 128, width: 220, flexDirection: 'column',
-        justifyContent: 'flex-end', // Push content down to the anchor
+        position: 'absolute', right: 32, bottom: 0, height: 128, width: 220, flexDirection: 'column',
+        justifyContent: 'flex-end',
       }
     });
   }
@@ -815,28 +815,30 @@ export class HUD extends ui.UIComponent<typeof HUD> {
     return ui.View({
       children: [
         ui.Text({
-          text: 'Wave',
-          style: { 
-            fontSize: 32, textAlign: 'center', color: '#00e5ff',
-            textShadowColor: '#000000', textShadowOffset: [2, 2], textShadowRadius: 2 
+          text: 'WAVE',
+          style: {
+            fontSize: 13, textAlign: 'center', color: '#00e5ff',
+            fontFamily: 'Roboto-Mono', fontWeight: 'bold', letterSpacing: 3,
+            marginBottom: -8,
           }
         }),
         ui.Text({
           text: this.wave.derive(w => `${w}`),
           style: {
-            fontSize: 64,
-            textAlign: 'center',
-            fontFamily: 'Roboto-Mono',
-            color: '#00e5ff',
-            fontWeight: 'bold',
-            textShadowColor: '#000000', textShadowOffset: [4, 4], textShadowRadius: 4,
-            transform: [{ scale: this.waveScale }], 
+            fontSize: 60, textAlign: 'center',
+            fontFamily: 'Roboto-Mono', color: '#ffffff', fontWeight: 'bold',
+            textShadowColor: '#00e5ff', textShadowOffset: [0, 0], textShadowRadius: 10,
+            transform: [{ scale: this.waveScale }],
           }
         })
       ],
       style: {
-        height: 128, width: 128, position: 'absolute', left: '50%', top: 0,
-        layoutOrigin: [0.5, 0], flexDirection: 'column'
+        position: 'absolute', left: '50%', top: 8,
+        layoutOrigin: [0.5, 0],
+        flexDirection: 'column', alignItems: 'center',
+        backgroundColor: 'rgba(0,0,0,0.75)',
+        borderRadius: 12, borderWidth: 2, borderColor: '#00e5ff',
+        paddingTop: 8, paddingBottom: 10, paddingLeft: 20, paddingRight: 20,
       }
     });
   }
@@ -847,9 +849,9 @@ export class HUD extends ui.UIComponent<typeof HUD> {
   zombieCounterView() {
      return ui.View({
        style: {
-         position: 'absolute', top: 385, right: 32,
-         padding: 12, backgroundColor: 'rgba(0,0,0,0.6)', 
-         borderRadius: 8, borderWidth: 2, borderColor: '#555',
+         position: 'absolute', top: 8, right: 20,
+         padding: 12, backgroundColor: 'rgba(0,0,0,0.75)',
+         borderRadius: 10, borderWidth: 2, borderColor: '#ff4444',
          flexDirection: 'column', alignItems: 'flex-end'
        },
         children: [
@@ -992,7 +994,7 @@ export class HUD extends ui.UIComponent<typeof HUD> {
     return ui.View({
       style: {
         position: 'absolute',
-        bottom: 12,
+        bottom: 140,
         right: 28,
         flexDirection: 'column',
         alignItems: 'center',

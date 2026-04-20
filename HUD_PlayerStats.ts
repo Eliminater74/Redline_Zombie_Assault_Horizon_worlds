@@ -154,7 +154,7 @@ export class HUD_PlayerStats {
       return ui.View({
           style: {
               position: 'absolute',
-              top: 20,
+              top: 110,
               right: 20,
               padding: 12,
               backgroundColor: 'rgba(0, 0, 0, 0.7)',

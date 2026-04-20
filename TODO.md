@@ -4,15 +4,18 @@
 
 ## 🖥️ HUD IMPROVEMENTS
 
-### Available HUD Real Estate (from layout analysis)
-| Area | Position | Currently Empty? |
-|------|----------|-----------------|
-| Bottom-right corner | `bottom: 0, right: 32` | ✅ Yes — best clock spot |
-| Top-left below player list | `top: ~200, left: 32` | ✅ Yes |
-| Below zombie counter | `top: ~500, right: 32` | ✅ Yes |
+### HUD Layout Redesign — standard shooter layout
+
+- [x] **Wave panel** — top-center styled dark panel with cyan border and "WAVE" label (was plain text)
+- [x] **Zombie counter** — moved from mid-right (`top:385`) to top-right (`top:8`) — was floating in the middle
+- [x] **Stats panel** — moved below zombie counter (`top:110, right:20`) to stop overlapping
+- [x] **Ammo** — moved from bottom-left to bottom-right (`right:32`) — shooter convention
+- [x] **Clock** — moved to `bottom:140, right:28`, above ammo panel
+- [x] **Kill counter** — moved from `bottom:110` to `bottom:0` since ammo vacated bottom-left
+- [x] **Health bar** — widened from 33% to 45% of screen
 
 ### Ideas
-- [ ] **Local Clock** — `new Date().toLocaleTimeString()` on a 1s setInterval. Bottom-right corner (`bottom: 0, right: 32`). No server needed, pure client-side.
+
 - [ ] **Session Timer** — "Time in session: 00:34:12". Could go next to clock.
 - [ ] **Wave Timer** — Show how long current wave has been running (waveStartTime already tracked in WaveManager).
 - [ ] **Kill Streak Indicator** — "🔥 5 KILLS IN A ROW!" flash overlay, similar to headshot indicator.

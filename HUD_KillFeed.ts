@@ -59,7 +59,7 @@ export class HUD_KillFeed {
   createKillCounterView() {
     return ui.View({
       style: {
-        position: 'absolute', left: 32, bottom: 110, // Moved down (was 150), aligned left with Ammo (was 30)
+        position: 'absolute', left: 32, bottom: 0,
         flexDirection: 'row', alignItems: 'center',
         padding: 10, backgroundColor: 'rgba(0, 0, 0, 0.7)', borderRadius: 8, // Darker background for contrast
         borderColor: '#444', borderWidth: 2 // Added border for definition
