@@ -2,7 +2,7 @@
 
 ---
 
-## [26.0.0] — 2026-04-19
+## [26.1.0] — 2026-04-20
 
 ### Zombie AI
 
@@ -23,7 +23,7 @@
 
 - **HUD.ts** — Local clock added to bottom-right corner. 12-hour format with AM/PM. Updates every second. Interval properly cancelled in `dispose()`.
 - **HUD_ProximitySensor.ts** — Left/right direction inverted. Horizon's right vector points opposite to UI convention — swapped `sensorLeft`/`sensorRight` bindings to match actual threat direction.
-- **HUD.ts** — Version string updated to v26.0.0.
+- **HUD.ts** — Version string updated to v26.1.0.
 
 ---
 

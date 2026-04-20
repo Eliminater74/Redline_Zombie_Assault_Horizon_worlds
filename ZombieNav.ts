@@ -19,6 +19,7 @@ export class ZombieNavigator {
   private readonly longTermStuckWindowMs = 120000;
   private readonly longTermStuckDistanceThreshold = 1.5;
   private readonly longTermStuckHitLimit = 5;
+  private readonly teleportRecoveryRadius = 4.5;
   
   // COMPONENTS
   private agent: nav.NavMeshAgent;
@@ -54,7 +55,7 @@ export class ZombieNavigator {
   private directChaseUntil = 0;
 
   public get isHopelesslyStuck(): boolean {
-      return this.stuckAttempts > this.hopelessStuckAttemptLimit || this.forceStuck; // Check both counters
+      return false;
   }
   
   // FAILSAFE FLAG
@@ -305,6 +306,46 @@ export class ZombieNavigator {
       this.directChaseUntil = now + this.unstuckDirectChaseMs;
   }
 
+  private teleportToNearestNavPoint(now: number, target: hz.Player | null): boolean {
+      if (!this.navMesh) return false;
+
+      const myPos = this.entity.position.get();
+      let anchorPos = myPos;
+
+      if (target) {
+          try {
+              anchorPos = target.position.get();
+          } catch (e) {
+              anchorPos = myPos;
+          }
+      }
+
+      const sampled = this.navMesh.getNearestPoint(anchorPos, this.teleportRecoveryRadius)
+        ?? this.navMesh.getNearestPoint(myPos, this.teleportRecoveryRadius)
+        ?? this.navMesh.getNearestPoint(myPos, this.teleportRecoveryRadius + 2.5);
+
+      if (!sampled) return false;
+
+      try {
+          this.agent.clearDestination();
+          this.entity.position.set(sampled);
+          this.cachedDestination = null;
+          this.lastStuckCheckPos = sampled;
+          this.lastStuckCheckTime = now;
+          this.longTermStuckPos = sampled;
+          this.longTermStuckTime = now;
+          this.stuckAttempts = 0;
+          this.longTermStuckHits = 0;
+          this.forceStuck = false;
+          this.isUnstucking = false;
+          this.unstuckEndTime = 0;
+          this.directChaseUntil = now + this.unstuckDirectChaseMs;
+          return true;
+      } catch (e) {
+          return false;
+      }
+  }
+
   private checkIfStuck(now: number, target: hz.Player | null) {
       const hasTarget = target !== null;
 
@@ -330,6 +371,9 @@ export class ZombieNavigator {
               // Try a sidestep/backstep maneuver before escalating.
               if (this.stuckAttempts >= 3) {
                    this.performUnstuck(now, target);
+              }
+              if (this.stuckAttempts >= this.hopelessStuckAttemptLimit) {
+                   this.teleportToNearestNavPoint(now, target);
               }
           } else {
               // Reset if they managed to move
@@ -361,8 +405,8 @@ export class ZombieNavigator {
                    this.performUnstuck(now, target);
 
                    if (this.longTermStuckHits >= this.longTermStuckHitLimit) {
-                       console.log("[ZombieNav] LONG TERM STUCK (Persistent). KILLING. 💀");
-                       this.forceStuck = true;
+                       console.log("[ZombieNav] LONG TERM STUCK (Persistent). TELEPORTING.");
+                       this.teleportToNearestNavPoint(now, target);
                    }
               } else {
                    this.longTermStuckHits = 0;

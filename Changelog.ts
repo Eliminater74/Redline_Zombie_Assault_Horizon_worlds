@@ -11,7 +11,7 @@ class Changelog extends hz.Component<typeof Changelog> {
     const textGizmo = this.entity.as(hz.TextGizmo);
     if (textGizmo) {
         textGizmo.text.set(
-            "=== UPDATE v26.0.0 (Apr 19) ===\n" +
+            "=== UPDATE v26.1.0 (Apr 20) ===\n" +
             "AI, SPAWN & HUD OVERHAUL\n\n" +
             "• Smarter Zombies\n" +
             "  - Speed, aggression & range\n" +
