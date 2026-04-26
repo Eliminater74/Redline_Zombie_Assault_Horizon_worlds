@@ -2,6 +2,20 @@
 
 ---
 
+## [26.1.2] — 2026-04-26
+
+### Navigation System
+
+- **ZombieNav.ts** — Added exclusion zones along all outside walls. Zombies no longer spawn in the narrow gaps between outer wall geometry, eliminating stuck-spawn cases in wall cavities.
+- **ZombieNav.ts** — Added exclusion zones over all safe-zone areas. Zombies can no longer spawn directly on top of safe-zones, ensuring players have a reliable refuge.
+- **ZombieNav.ts** / **ZombieSpawnPoint.ts** — General navigation zone coverage pass: improved boundary handling and cleaned up zone placement inconsistencies across the map.
+
+### Bug Fixes & Maintenance
+
+- Miscellaneous small bug fixes and code cleanup identified during the navigation audit.
+
+---
+
 ## [26.1.0] — 2026-04-20
 
 ### Zombie AI

@@ -11,22 +11,17 @@ class Changelog extends hz.Component<typeof Changelog> {
     const textGizmo = this.entity.as(hz.TextGizmo);
     if (textGizmo) {
         textGizmo.text.set(
-            "=== UPDATE v26.1.0 (Apr 20) ===\n" +
-            "AI, SPAWN & HUD OVERHAUL\n\n" +
-            "• Smarter Zombies\n" +
-            "  - Speed, aggression & range\n" +
-            "    scale with wave number\n" +
-            "  - Chase last known position\n" +
-            "    for 8s after losing target\n" +
-            "  - Spread across players in\n" +
-            "    multiplayer (no pile-ons)\n" +
-            "• Spawn fix\n" +
-            "  - Bundles preload during lobby\n" +
-            "  - No more 0/N stuck waves\n" +
-            "• Proximity sensor fixed\n" +
-            "  - Left/right direction corrected\n" +
-            "• Local clock on HUD\n" +
-            "  - Bottom-right corner\n\n" +
+            "=== UPDATE v26.1.2 (Apr 26) ===\n" +
+            "NAVIGATION & SPAWN ZONES\n\n" +
+            "• Exclusion zones added\n" +
+            "  - Outside walls: zombies no\n" +
+            "    longer spawn between walls\n" +
+            "  - Safe zones: zombies no\n" +
+            "    longer spawn on top of them\n" +
+            "• Navigation system updated\n" +
+            "  - Improved zone coverage\n" +
+            "  - Cleaner boundary handling\n" +
+            "• Bug fixes & cleanup\n\n" +
             "HOLD THE LINE. BREAK YOUR RECORD."
         );
     }
