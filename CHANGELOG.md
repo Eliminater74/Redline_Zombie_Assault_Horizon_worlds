@@ -2,6 +2,25 @@
 
 ---
 
+## [26.1.3] — 2026-05-03
+
+### Zombie AI
+
+- **Zombie.ts** — Hit Rush: every time a zombie takes damage and survives, it bursts to 1.9× speed for 1.5 seconds. Wounding a zombie without killing it now causes it to charge the shooter. Timer handle stored as `hitRushTimer` and cancelled in `cleanup()` and `finishReviveServer()`.
+- **Zombie.ts** — Ammo Sound Awareness: zombies within 22m of a player who picks up an ammo box investigate that position for 4 seconds via the new `ammoPickedUp` local event. Grabbing ammo in a crowd reveals your position.
+- **Zombie.ts** / **ZombieNav.ts** — Coordinated Flanking: each zombie is assigned one of five fixed approach sectors (−120°, −60°, 0°, +60°, +120°) based on its entity ID. Groups naturally encircle the player instead of all charging from the same direction. A ±12° random jitter per flank interval keeps movement from looking mechanical.
+
+### Ammo Leaderboard
+
+- **Events.ts** — Added `ammoPickedUp` local event `{ player }`. Added `'ammo'` to the `updateLeaderboard` stat union type.
+- **GameConfig.ts** — Added `AMMO_KEY` (`PlayerData:ammo`) and `LEADERBOARD_AMMO` (`MostAmmo`).
+- **PersistenceManager.ts** — Added `saveAmmo()` and `resetAmmoOnly()` following the same pattern as kills/headshots.
+- **AmmoBox.ts** — Broadcasts `ammoPickedUp` server-side the moment a box is collected.
+- **PlayerManager.ts** — Tracks `playerAmmo` per player. Loads from persistence on join. Increments, saves to persistence, and updates the `MostAmmo` leaderboard on every pickup. Cleans up on player exit.
+- **LeaderboardManager.ts** — Added `ammoLeaderboardName` prop (default `"MostAmmo"`). Routes `'ammo'` stat to that board.
+
+---
+
 ## [26.1.2] — 2026-04-26
 
 ### Navigation System

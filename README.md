@@ -10,7 +10,7 @@
 
 A wave-based zombie survival game built in [Meta Horizon Worlds](https://www.meta.com/horizon-worlds/). Fight through endless waves of increasingly aggressive zombies, rack up kills, and compete on the leaderboard.
 
-**Current Version:** v26.1.2
+**Current Version:** v26.1.3
 
 ---
 

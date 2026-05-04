@@ -11,17 +11,18 @@ class Changelog extends hz.Component<typeof Changelog> {
     const textGizmo = this.entity.as(hz.TextGizmo);
     if (textGizmo) {
         textGizmo.text.set(
-            "=== UPDATE v26.1.2 (Apr 26) ===\n" +
-            "NAVIGATION & SPAWN ZONES\n\n" +
-            "• Exclusion zones added\n" +
-            "  - Outside walls: zombies no\n" +
-            "    longer spawn between walls\n" +
-            "  - Safe zones: zombies no\n" +
-            "    longer spawn on top of them\n" +
-            "• Navigation system updated\n" +
-            "  - Improved zone coverage\n" +
-            "  - Cleaner boundary handling\n" +
-            "• Bug fixes & cleanup\n\n" +
+            "=== UPDATE v26.1.3 (May 3) ===\n" +
+            "SMARTER ZOMBIES & AMMO BOARD\n\n" +
+            "• Zombies got trickier\n" +
+            "  - Hit Rush: wounding a zombie\n" +
+            "    makes it charge faster (1.9x)\n" +
+            "    for 1.5s — finish your kills\n" +
+            "  - Ammo awareness: picking up\n" +
+            "    ammo alerts nearby zombies\n" +
+            "  - Coordinated flanking: groups\n" +
+            "    now encircle from all sides\n" +
+            "• New leaderboard: Most Ammo\n" +
+            "  - Tracks lifetime ammo pickups\n\n" +
             "HOLD THE LINE. BREAK YOUR RECORD."
         );
     }

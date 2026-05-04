@@ -46,7 +46,7 @@ class LeaderboardManager extends hz.Component<typeof LeaderboardManager> {
     console.log(`[LeaderboardManager] Configured Boards: Wave='${this.props.waveLeaderboardName}', Kills='${this.props.killsLeaderboardName}', Headshots='${this.props.headshotsLeaderboardName}', Level='${this.props.levelLeaderboardName}'`);
   }
 
-  onUpdateLeaderboard(data: { player: hz.Player, stat: 'kills' | 'headshots' | 'wave' | 'level', value: number }) {
+  onUpdateLeaderboard(data: { player: hz.Player, stat: 'kills' | 'headshots' | 'wave' | 'level' | 'ammo', value: number }) {
       if (!this.world.leaderboards) {
           console.error("[LeaderboardManager] CRITICAL: Leaderboard API unavailable!");
           return;

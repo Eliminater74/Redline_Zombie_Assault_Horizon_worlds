@@ -209,7 +209,7 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
     // COORDINATED FLANKING: Assign a fixed approach sector based on entity ID so groups
     // naturally encircle the player from different directions instead of all charging head-on.
     // 5 slots × 60° = -120°, -60°, 0°, +60°, +120°
-    const flankSlot = Number(this.entity.id % 5n);
+    const flankSlot = Number(this.entity.id) % 5;
     this.navigator.setPreferredFlankAngle(flankSlot * 60 - 120);
 
     // =========================================================================
