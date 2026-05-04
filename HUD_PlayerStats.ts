@@ -15,6 +15,7 @@ export class HUD_PlayerStats {
   statsWave = new ui.Binding<number>(0);
   statsKills = new ui.Binding<number>(0);
   statsHeadshots = new ui.Binding<number>(0);
+  statsAmmo = new ui.Binding<number>(0);
   statsVisible = new ui.Binding<boolean>(true);
 
   // Level System Bindings
@@ -127,11 +128,12 @@ export class HUD_PlayerStats {
   /**
    * Updates the stats bindings with new data.
    */
-  onUpdatePlayerStats(data: { visits: number, highestWave: number, kills: number, headshots: number }, player: hz.Player) {
+  onUpdatePlayerStats(data: { visits: number, highestWave: number, kills: number, headshots: number, ammo: number }, player: hz.Player) {
       this.statsVisits.set(data.visits, [player]);
       this.statsWave.set(data.highestWave, [player]);
       this.statsKills.set(data.kills, [player]);
       this.statsHeadshots.set(data.headshots, [player]);
+      this.statsAmmo.set(data.ammo ?? 0, [player]);
   }
 
   /**
@@ -210,6 +212,9 @@ export class HUD_PlayerStats {
 
                // Headshots
                this.statRow('Headshots', this.statsHeadshots, '#FFA500'),
+
+               // Ammo Pickups
+               this.statRow('Ammo Picked', this.statsAmmo, '#44AAFF'),
           ]
       });
   }

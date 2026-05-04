@@ -280,7 +280,7 @@ export class HUD extends ui.UIComponent<typeof HUD> {
     const sub5 = this.connectNetworkEvent(
       player,
       Events.viewPlayerStats,
-      (data: { visits: number, highestWave: number, kills: number, headshots: number }) => {
+      (data: { visits: number, highestWave: number, kills: number, headshots: number, ammo: number }) => {
          this.playerStats.onUpdatePlayerStats(data, player);
          // Sync legacy kill counter
          this.killFeed.onUpdateKillCount({ count: data.kills, player: player });

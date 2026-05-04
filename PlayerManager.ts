@@ -265,6 +265,7 @@ class PlayerManager extends hz.Component<typeof PlayerManager> {
       const kills = this.playerKills.get(player.id) ?? 0;
       const headshots = this.playerHeadshots.get(player.id) ?? 0;
       const highestWave = this.playerHighestWave.get(player.id) ?? 0;
+      const ammo = this.playerAmmo.get(player.id) ?? 0;
 
       // SYNC: Ensure Leaderboard reflects Persistence (Fixes blank boards after reset)
       // We use 'false' to only update if our local record is higher than the board's record
@@ -283,7 +284,8 @@ class PlayerManager extends hz.Component<typeof PlayerManager> {
           visits,
           highestWave,
           kills,
-          headshots
+          headshots,
+          ammo,
       });
   }
 

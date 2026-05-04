@@ -79,11 +79,12 @@ export const Events = {
   viewWave: new hz.NetworkEvent<{ wave: number }>('viewWave'),
   
   // STATS PANEL EVENT
-  viewPlayerStats: new hz.NetworkEvent<{ 
-    visits: number, 
-    highestWave: number, 
-    kills: number, 
-    headshots: number 
+  viewPlayerStats: new hz.NetworkEvent<{
+    visits: number,
+    highestWave: number,
+    kills: number,
+    headshots: number,
+    ammo: number,
   }>('viewPlayerStats'),
   
 
