@@ -376,6 +376,8 @@ class PlayerManager extends hz.Component<typeof PlayerManager> {
           stat: 'ammo',
           value: newCount,
       });
+      // Refresh this player's HUD stats panel immediately.
+      this.sendPlayerStats(data.player);
   }
 
   onPlayerHeadshot(data: { player: hz.Player }) {
