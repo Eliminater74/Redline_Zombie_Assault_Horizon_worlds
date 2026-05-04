@@ -101,6 +101,11 @@ class AmmoBox extends hz.Component<typeof AmmoBox> {
 
     this.sendNetworkEvent(player, Events.giveAmmo, {});
 
+    // Notify server-side tracking for the ammo leaderboard.
+    if (this.isServer()) {
+      this.sendLocalBroadcastEvent(Events.ammoPickedUp, { player });
+    }
+
     try {
         if (this.entity.isValidReference.get()) {
             this.entity.visible.set(false);

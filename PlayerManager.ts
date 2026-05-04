@@ -48,6 +48,7 @@ class PlayerManager extends hz.Component<typeof PlayerManager> {
   private playerHealth = new Map<number, number>();
   private playerKills = new Map<number, number>(); // Track kills by ID
   private playerHeadshots = new Map<number, number>(); // Track headshots by ID
+  private playerAmmo = new Map<number, number>(); // Track lifetime ammo pickups by ID
   private playerVisits = new Map<number, number>(); // Track visits by ID
   private playerHighestWave = new Map<number, number>(); // Track highest wave by ID
   private processedZombieDeathSeq = new Map<string, number>();
@@ -199,6 +200,9 @@ class PlayerManager extends hz.Component<typeof PlayerManager> {
     
     // NEW: Listen for Headshots
     this.connectLocalBroadcastEvent(Events.playerHeadshot, this.onPlayerHeadshot.bind(this));
+
+    // NEW: Listen for ammo pickups for the MostAmmo leaderboard
+    this.connectLocalBroadcastEvent(Events.ammoPickedUp, this.onAmmoPickedUp.bind(this));
     
     // NEW: Listen for zombie moans (ambient sounds)
     this.connectLocalBroadcastEvent(Events.zombieMoan, this.onZombieMoan.bind(this));
@@ -356,6 +360,20 @@ class PlayerManager extends hz.Component<typeof PlayerManager> {
       
       // Update HUD Stats
       this.sendPlayerStats(data.killer);
+  }
+
+  onAmmoPickedUp(data: { player: hz.Player }): void {
+      if (!this.isServer()) return;
+      const pid = data.player.id;
+      const current = this.playerAmmo.get(pid) ?? 0;
+      const newCount = current + 1;
+      this.playerAmmo.set(pid, newCount);
+      PersistenceManager.saveAmmo(this.world, data.player, newCount);
+      this.sendLocalBroadcastEvent(Events.updateLeaderboard, {
+          player: data.player,
+          stat: 'ammo',
+          value: newCount,
+      });
   }
 
   onPlayerHeadshot(data: { player: hz.Player }) {
@@ -689,6 +707,20 @@ class PlayerManager extends hz.Component<typeof PlayerManager> {
         } catch(e) { console.warn("Failed to load headshots", e); }
         
         try {
+            const savedAmmo = this.world.persistentStorage.getPlayerVariable<number>(player, GameConfig.AMMO_KEY);
+            if (savedAmmo !== undefined && savedAmmo !== null) {
+                this.playerAmmo.set(player.id, savedAmmo);
+                this.pendingTimers.push(this.async.setTimeout(() => {
+                    this.sendLocalBroadcastEvent(Events.updateLeaderboard, {
+                        player,
+                        stat: 'ammo',
+                        value: savedAmmo,
+                    });
+                }, 1400));
+            }
+        } catch(e) { console.warn("Failed to load ammo", e); }
+
+        try {
             // Load Highest Wave
              const savedWave = this.world.persistentStorage.getPlayerVariable<number>(player, GameConfig.WAVE_KEY);
             if (savedWave !== undefined && savedWave !== null) {
@@ -714,6 +746,7 @@ class PlayerManager extends hz.Component<typeof PlayerManager> {
 
     this.playerHealth.delete(player.id);
     this.playerKills.delete(player.id); // Clean up
+    this.playerAmmo.delete(player.id);
     setAlivePlayers(alivePlayers.filter(p => p.id !== player.id));
     alivePlayerIds.delete(player.id);
     this.initialPlayers = this.initialPlayers.filter(p => p.id !== player.id);

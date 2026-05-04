@@ -55,6 +55,7 @@ export const Events = {
   // --- PLAYER EVENTS ---
   hitPlayer: new hz.LocalEvent<{ player: hz.Player, pos: hz.Vec3 }>('hitPlayer'),
   giveAmmo: new hz.NetworkEvent<{}>('giveAmmo'),
+  ammoPickedUp: new hz.LocalEvent<{ player: hz.Player }>('ammoPickedUp'),
   
   // NEW: Reliable Initialization
   requestWeaponInit: new hz.NetworkEvent<{ requestor: hz.Player }>('requestWeaponInit'), // Client -> Server handshake
@@ -112,7 +113,7 @@ export const Events = {
   // --- LEADERBOARD EVENTS ---
   updateLeaderboard: new hz.LocalEvent<{
       player: hz.Player,
-      stat: 'kills' | 'headshots' | 'wave' | 'level',
+      stat: 'kills' | 'headshots' | 'wave' | 'level' | 'ammo',
       value: number
   }>('updateLeaderboard'),
 

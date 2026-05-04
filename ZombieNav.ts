@@ -32,6 +32,8 @@ export class ZombieNavigator {
   // FLANKING
   private flankAngle = 0;
   private lastFlankTime = 0;
+  // Assigned once by Zombie.ts based on entity ID so groups spread naturally.
+  private preferredFlankAngle: number | null = null;
   
   // PREDICTION
   private lastTargetPos: hz.Vec3 | null = null;
@@ -70,6 +72,15 @@ export class ZombieNavigator {
     
     // Randomize stuck check offset for staggering
     this.lastStuckCheckTime = Date.now() - Math.floor(Math.random() * 3000);
+  }
+
+  /**
+   * Called by Zombie.ts once at preStart to lock in this zombie's approach sector.
+   * Distributes a group of zombies across 5 angular slots (-120°…+120°) so they
+   * encircle the player instead of all charging from the same direction.
+   */
+  setPreferredFlankAngle(angle: number): void {
+    this.preferredFlankAngle = angle;
   }
 
   /**
@@ -179,14 +190,19 @@ export class ZombieNavigator {
         return;
     }
 
-    // Update flank angle randomly (2s - 5s)
+    // Update flank angle (2s – 5s cadence)
     if (now - this.lastFlankTime > (2000 + Math.random() * 3000)) {
-        // Adaptive flank: wider in open space, narrower in corridors.
-        const minAngle = distToTarget > 12 ? 20 : 8;
-        const maxAngle = distToTarget > 12 ? 50 : 26;
-        const sign = Math.random() < 0.5 ? -1 : 1;
-        const angle = minAngle + Math.random() * (maxAngle - minAngle);
-        this.flankAngle = sign * angle;
+        if (this.preferredFlankAngle !== null) {
+            // Use this zombie's assigned sector + small random jitter so movement feels
+            // natural while still spreading the group across different approach directions.
+            this.flankAngle = this.preferredFlankAngle + (Math.random() * 24 - 12);
+        } else {
+            // Adaptive flank: wider in open space, narrower in corridors.
+            const minAngle = distToTarget > 12 ? 20 : 8;
+            const maxAngle = distToTarget > 12 ? 50 : 26;
+            const sign = Math.random() < 0.5 ? -1 : 1;
+            this.flankAngle = sign * (minAngle + Math.random() * (maxAngle - minAngle));
+        }
         this.lastFlankTime = now;
     }
 

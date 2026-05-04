@@ -169,4 +169,24 @@ export class PersistenceManager {
         if (world.leaderboards) world.leaderboards.setScoreForPlayer(GameConfig.LEADERBOARD_HEADSHOTS, player, 0, true);
     } catch(e) {}
   }
+
+  static saveAmmo(world: hz.World, player: hz.Player, totalAmmo: number) {
+    if (!player || !player.isValidReference.get()) return;
+    try {
+      if (world.leaderboards) {
+        world.leaderboards.setScoreForPlayer(GameConfig.LEADERBOARD_AMMO, player, totalAmmo, true);
+      }
+      world.persistentStorage.setPlayerVariable(player, GameConfig.AMMO_KEY, totalAmmo);
+    } catch (e) {
+      console.error(`[Persistence] Error saving ammo for ${player.name.get()}:`, e);
+    }
+  }
+
+  static resetAmmoOnly(world: hz.World, player: hz.Player) {
+    if (!player || !player.isValidReference.get()) return;
+    try {
+        world.persistentStorage.setPlayerVariable(player, GameConfig.AMMO_KEY, 0);
+        if (world.leaderboards) world.leaderboards.setScoreForPlayer(GameConfig.LEADERBOARD_AMMO, player, 0, true);
+    } catch(e) {}
+  }
 }

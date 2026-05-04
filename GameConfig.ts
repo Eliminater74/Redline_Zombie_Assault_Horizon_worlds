@@ -25,6 +25,7 @@ export class GameConfig {
   private static readonly BASE_HEADSHOTS_KEY = "PlayerData:headshots";
   private static readonly BASE_XP_KEY = "PlayerData:levelxp";
   private static readonly BASE_LEVEL_KEY = "PlayerData:plevel";
+  private static readonly BASE_AMMO_KEY = "PlayerData:ammo";
 
   private static withVersion(baseKey: string): string {
     if (this.DATA_VERSION <= 1) return baseKey;
@@ -52,6 +53,10 @@ export class GameConfig {
     return this.withVersion(this.BASE_LEVEL_KEY);
   }
 
+  static get AMMO_KEY(): string {
+    return this.withVersion(this.BASE_AMMO_KEY);
+  }
+
   // Leaderboard Names (Match these in the World Editor!)
   static get LEADERBOARD_WAVE(): string {
     return "HighestWave";
@@ -67,6 +72,10 @@ export class GameConfig {
 
   static get LEADERBOARD_LEVEL(): string {
     return "ExperienceLevel";
+  }
+
+  static get LEADERBOARD_AMMO(): string {
+    return "MostAmmo";
   }
 
   // ========================================================================

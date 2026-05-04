@@ -112,6 +112,8 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
   private attackSpeedTimer: number | null = null;
   private attackDamageTimer: number | null = null;
   private reviveCollisionTimer: number | null = null;
+  // HIT RUSH: Stores the handle so cleanup() can cancel it if zombie dies mid-burst.
+  private hitRushTimer: number | null = null;
   private reviveGraceUntil = 0;
   private lastProcessedDamageSeq = 0;
   private lastProcessedGunshotSeq = 0;
@@ -201,6 +203,14 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
     this.connectNetworkBroadcastEvent(Events.zombieDeath, this.zombieDeath.bind(this));
     this.connectNetworkBroadcastEvent(Events.gunshot, this.onGunshot.bind(this));
     this.connectNetworkBroadcastEvent(Events.ghostHunt, this.onGhostHunt.bind(this));
+    // AMMO SOUND AWARENESS: Ammo pickups make noise — nearby zombies investigate the position.
+    this.connectLocalBroadcastEvent(Events.ammoPickedUp, this.onAmmoPickedUp.bind(this));
+
+    // COORDINATED FLANKING: Assign a fixed approach sector based on entity ID so groups
+    // naturally encircle the player from different directions instead of all charging head-on.
+    // 5 slots × 60° = -120°, -60°, 0°, +60°, +120°
+    const flankSlot = Number(this.entity.id % 5n);
+    this.navigator.setPreferredFlankAngle(flankSlot * 60 - 120);
 
     // =========================================================================
     // OPTIMIZATION: Removed direct onUpdate hook
@@ -244,6 +254,24 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
   }
 
   // ============================================================================
+  // AI: AMMO SOUND AWARENESS
+  // ============================================================================
+
+  private onAmmoPickedUp(data: { player: hz.Player }): void {
+    if (!this.alive || !this.isServer()) return;
+    try {
+      const playerPos = data.player.position.get();
+      const myPos = this.entity.position.get();
+      const dx = playerPos.x - myPos.x, dy = playerPos.y - myPos.y, dz = playerPos.z - myPos.z;
+      // Investigate if within 22m (484 = 22^2) — ammo clinking is loud.
+      if (dx * dx + dy * dy + dz * dz < 484) {
+        this.investigatePos = playerPos;
+        this.investigateTimeout = Date.now() + 4000;
+      }
+    } catch (e) {}
+  }
+
+  // ============================================================================
   // LIFECYCLE: START
   // ============================================================================
 
@@ -265,6 +293,10 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
     if (this.reviveCollisionTimer !== null) {
       this.async.clearTimeout(this.reviveCollisionTimer);
       this.reviveCollisionTimer = null;
+    }
+    if (this.hitRushTimer !== null) {
+      this.async.clearTimeout(this.hitRushTimer);
+      this.hitRushTimer = null;
     }
     this.setTarget(null);
     unregisterZombie(this);
@@ -721,6 +753,10 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
     this.isRampaging = false;
     this.nextAttackTime = 0;
     this.isDead = false;
+    if (this.hitRushTimer !== null) {
+      this.async.clearTimeout(this.hitRushTimer);
+      this.hitRushTimer = null;
+    }
 
     // Wave-scaled aggression: faster attacks, wider reach, quicker brain at higher waves (caps at wave 30).
     const waveT = Math.min((this.spawnWave - 1) / 29, 1.0);
@@ -845,6 +881,19 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
       this.death(data.instigator);
       return;
     }
+
+    // HIT RUSH: Wounded-animal speed burst for 1.5s when struck.
+    // Makes kiting dangerous — hitting a zombie causes it to lunge faster briefly.
+    if (this.hitRushTimer !== null) this.async.clearTimeout(this.hitRushTimer);
+    this.agent.maxSpeed.set(this.spawnSpeed * 1.9);
+    this.hitRushTimer = this.async.setTimeout(() => {
+        this.hitRushTimer = null;
+        try {
+            if (this.alive && this.entity.isValidReference.get()) {
+                this.agent.maxSpeed.set(this.isRampaging ? this.spawnSpeed * 1.3 : this.spawnSpeed);
+            }
+        } catch (e) {}
+    }, 1500);
 
     // RAMPAGE MODE: Speed boost when health drops below 50%
     if (this.currentHealth < (this.spawnHealth / 2) && !this.isRampaging) {

@@ -29,6 +29,9 @@ class LeaderboardManager extends hz.Component<typeof LeaderboardManager> {
     /** Name of the Level Leaderboard (e.g. "ExperienceLevel") */
     levelLeaderboardName: { type: hz.PropTypes.String, default: "ExperienceLevel" },
 
+    /** Name of the Ammo Leaderboard (e.g. "MostAmmo") */
+    ammoLeaderboardName: { type: hz.PropTypes.String, default: "MostAmmo" },
+
     /** Optional Reference to Wave Visual Gizmo */
     waveGizmo: { type: hz.PropTypes.Entity },
     /** Optional Reference to Kills Visual Gizmo */
@@ -67,6 +70,9 @@ class LeaderboardManager extends hz.Component<typeof LeaderboardManager> {
               break;
           case 'level':
               boardName = this.props.levelLeaderboardName;
+              break;
+          case 'ammo':
+              boardName = this.props.ammoLeaderboardName;
               break;
           case 'wave':
               boardName = this.props.waveLeaderboardName;
