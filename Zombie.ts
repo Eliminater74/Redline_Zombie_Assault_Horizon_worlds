@@ -92,6 +92,8 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
   private aggroExpireTime = 0;
   /** Rampage mode flag - increases speed when health < 50% */
   private isRampaging = false;
+  /** Hit rush flag - blocks updateBody from overwriting the burst speed. */
+  private isHitRushing = false;
   /** Reference to the player within attack range */
   private closePlayer: hz.Player | null = null;
 
@@ -206,11 +208,6 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
     // AMMO SOUND AWARENESS: Ammo pickups make noise — nearby zombies investigate the position.
     this.connectLocalBroadcastEvent(Events.ammoPickedUp, this.onAmmoPickedUp.bind(this));
 
-    // COORDINATED FLANKING: Assign a fixed approach sector based on entity ID so groups
-    // naturally spread their angles without all charging head-on.
-    // 5 slots × 20° = -40°, -20°, 0°, +20°, +40° — within the original ±50° safe range.
-    const flankSlot = Number(this.entity.id) % 5;
-    this.navigator.setPreferredFlankAngle(flankSlot * 20 - 40);
 
     // =========================================================================
     // OPTIMIZATION: Removed direct onUpdate hook
@@ -438,8 +435,8 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
                this.closePlayer = null;
           }
 
-          // Lunge Logic (Sprint if close)
-          if (!this.isRampaging) {
+          // Lunge Logic (Sprint if close) — skip if hit rush or rampage already controls speed.
+          if (!this.isRampaging && !this.isHitRushing) {
               if (distSq < 25) { // < 5m
                    this.agent.maxSpeed.set(this.spawnSpeed * 1.5);
               } else {
@@ -448,7 +445,7 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
           }
       } else {
           this.closePlayer = null;
-          if (!this.isRampaging) this.agent.maxSpeed.set(this.spawnSpeed);
+          if (!this.isRampaging && !this.isHitRushing) this.agent.maxSpeed.set(this.spawnSpeed);
       }
 
       // 5. TRY ATTACK
@@ -751,6 +748,7 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
     this.aggroTargetId = null;
     this.aggroExpireTime = 0;
     this.isRampaging = false;
+    this.isHitRushing = false;
     this.nextAttackTime = 0;
     this.isDead = false;
     if (this.hitRushTimer !== null) {
@@ -885,9 +883,11 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
     // HIT RUSH: Wounded-animal speed burst for 1.5s when struck.
     // Makes kiting dangerous — hitting a zombie causes it to lunge faster briefly.
     if (this.hitRushTimer !== null) this.async.clearTimeout(this.hitRushTimer);
+    this.isHitRushing = true;
     this.agent.maxSpeed.set(this.spawnSpeed * 1.9);
     this.hitRushTimer = this.async.setTimeout(() => {
         this.hitRushTimer = null;
+        this.isHitRushing = false;
         try {
             if (this.alive && this.entity.isValidReference.get()) {
                 this.agent.maxSpeed.set(this.isRampaging ? this.spawnSpeed * 1.3 : this.spawnSpeed);
@@ -1088,8 +1088,12 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
             if (!this.entity.isValidReference.get()) return;
         } catch (e) { return; }
 
-        // Resume normal speed
-        if (this.alive) this.agent.maxSpeed.set(this.spawnSpeed);
+        // Resume appropriate speed (respect hit rush / rampage if still active).
+        if (this.alive) this.agent.maxSpeed.set(
+            this.isHitRushing ? this.spawnSpeed * 1.9 :
+            this.isRampaging  ? this.spawnSpeed * 1.3 :
+            this.spawnSpeed
+        );
 
         // Check if target is still in range
         const target = this.closePlayer;
