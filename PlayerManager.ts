@@ -451,7 +451,9 @@ class PlayerManager extends hz.Component<typeof PlayerManager> {
             this.spawnPlayerAlive(player);
             // Do NOT reset HUD kills to 0, keep them as is (or refresh from map)
             const k = this.playerKills.get(player.id) ?? 0;
-            this.sendNetworkBroadcastEvent(Events.updateKillCount, { count: k, player }); 
+            this.sendNetworkBroadcastEvent(Events.updateKillCount, { count: k, player });
+            // Refresh full stats panel so ammo (and all other values) are current.
+            this.sendPlayerStats(player);
         });
         
         // this.startAFKCheck(); // Moved to AFKWatchdog.ts
@@ -583,10 +585,12 @@ class PlayerManager extends hz.Component<typeof PlayerManager> {
     this.initialPlayers.forEach(player => {
         if (!player || !player.isValidReference.get()) return;
 
-        // Upload Wave/Kill through centralized persistence layer
+        // Upload Wave/Kill/Ammo through centralized persistence layer
         PersistenceManager.saveWave(this.world, player, this.currentWave);
         const kills = this.playerKills.get(player.id) ?? 0;
         PersistenceManager.saveKills(this.world, player, kills);
+        const ammo = this.playerAmmo.get(player.id) ?? 0;
+        PersistenceManager.saveAmmo(this.world, player, ammo);
         
         // Update local highest wave if NEW record
         const currentHigh = this.playerHighestWave.get(player.id) ?? 0;
