@@ -141,7 +141,6 @@ export class HUD extends ui.UIComponent<typeof HUD> {
     // HUD HEALTH: Listen for a refresh request (from player trigger, admin, or server watchdog).
     // Re-requests current state from the server to unstick stale HUD data without the
     // player having to leave and rejoin the world.
-    this.connectNetworkBroadcastEvent(Events.requestHudRefresh, this.onHudRefresh.bind(this));
 
     // Important Cleanup Hook
     this.connectCodeBlockEvent(this.entity, hz.CodeBlockEvents.OnPlayerExitWorld, this.onPlayerExitWorld.bind(this));
@@ -532,28 +531,6 @@ export class HUD extends ui.UIComponent<typeof HUD> {
   }
 
   // ---------------------------------------------------------
-  // HUD REFRESH (Freeze Recovery)
-  // ---------------------------------------------------------
-  /**
-   * Forces the HUD to re-request all current state from the server.
-   * Triggered by Events.requestHudRefresh — broadcasted by a world trigger the
-   * player can interact with, by an admin command, or by the server watchdog.
-   * This unsticks stale HUD panels without the player leaving the world.
-   */
-  onHudRefresh(): void {
-    // Re-request current game status (wave, zombie count) from the server.
-    // WaveManager responds with statusReport which routes back through
-    // updateZombieCount / viewWave events.
-    this.sendNetworkBroadcastEvent(Events.requestStatus, {});
-
-    // Re-refresh the kill counter display for the local player.
-    this.killFeed.refreshKillCount();
-
-    // Reset the clock watchdog baseline so it doesn't immediately fire again.
-    this.lastClockTick = Date.now();
-    console.log("[HUD] HUD refresh requested — re-syncing state from server.");
-  }
-
   // ---------------------------------------------------------
   // HEADSHOT INDICATOR
   // ---------------------------------------------------------

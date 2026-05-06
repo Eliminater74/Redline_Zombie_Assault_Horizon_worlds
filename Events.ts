@@ -145,9 +145,11 @@ export const Events = {
   requestWaveReset: new hz.NetworkEvent<{}>('requestWaveReset'),
   requestWaveSkip: new hz.NetworkEvent<{}>('requestWaveSkip'),
 
-  // --- HUD HEALTH EVENTS ---
-  // Broadcast by any script (player trigger, server watchdog, or admin command) to
-  // force the HUD to re-request all current state from the server. Useful when a
-  // player reports their HUD is showing stale data or the clock has stopped ticking.
-  requestHudRefresh: new hz.NetworkEvent<{}>('requestHudRefresh'),
+  // --- FREEZE RECOVERY ---
+  // Server broadcasts this when a player has been position-and-rotation-stationary
+  // for recoverySeconds during active gameplay. PlayerManager responds by calling
+  // spawnPlayerAlive() (a native SpawnPointGizmo teleport) which reaches the client's
+  // native engine layer and may unstick a frozen Horizon client before resorting to
+  // a full AFK kill.
+  freezeRecovery: new hz.NetworkEvent<{ player: hz.Player }>('freezeRecovery'),
 };

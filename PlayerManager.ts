@@ -193,6 +193,12 @@ class PlayerManager extends hz.Component<typeof PlayerManager> {
     // NEW: Listen for AFK Watchdog kill commands
     this.connectNetworkBroadcastEvent(Events.killPlayer, this.onKillPlayerCommand.bind(this));
 
+    // FREEZE RECOVERY: AFKWatchdog fires this after recoverySeconds of zero movement/rotation.
+    // We fire a native SpawnPointGizmo.teleportPlayer() which bypasses the client scripting
+    // layer and reaches the Horizon engine directly — may unstick a frozen client without
+    // removing them from the game or changing their state.
+    this.connectNetworkBroadcastEvent(Events.freezeRecovery, this.onFreezeRecovery.bind(this));
+
     this.connectCodeBlockEvent(this.entity, hz.CodeBlockEvents.OnPlayerEnterWorld, this.playerEnter.bind(this));
     this.connectCodeBlockEvent(this.entity, hz.CodeBlockEvents.OnPlayerExitWorld, this.playerExit.bind(this));
 
@@ -481,6 +487,24 @@ class PlayerManager extends hz.Component<typeof PlayerManager> {
     
     if (this.props.HUD) {
         this.sendNetworkEvent(this.props.HUD, Events.viewHealth, { health: 20, player });
+    }
+  }
+
+  onFreezeRecovery(data: { player: hz.Player }): void {
+    if (!this.isServer()) return;
+    const player = data.player;
+    if (!player.isValidReference.get()) return;
+    // Only attempt recovery for players currently alive in the game.
+    // Dead players are already spectating at deadSpawn; they don't need this.
+    if (!alivePlayerIds.has(player.id)) return;
+
+    console.warn(`[PlayerManager] Freeze recovery teleport for ${player.name.get()}`);
+    // Teleport-only — no health reset, no state change. The goal is to fire a native
+    // SpawnPointGizmo command that reaches the Horizon engine layer below the frozen
+    // client scripting layer and forces a transform update that may unstick the client.
+    if (this.aliveSpawnPoints.length > 0) {
+      const rand = Math.floor(Math.random() * this.aliveSpawnPoints.length);
+      this.aliveSpawnPoints[rand].as(hz.SpawnPointGizmo)?.teleportPlayer(player);
     }
   }
 
