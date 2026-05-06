@@ -139,13 +139,11 @@ class WaveManager extends hz.Component<typeof WaveManager> {
   /** Handle for the pending deferred broadcast timeout — stored so cleanup() can cancel it. */
   private countBroadcastTimer: number | null = null;
 
-  /** Watchdog State for "Ghost Hunt" */
+  /** Watchdog State — resets wave if a small number of zombies stall for too long */
   private lastActiveCount = -1;
   private lastCountChangeTime = 0;
-  private readonly WATCHDOG_TIMEOUT_MS = 420000; // 7 Minutes (less aggressive)
-  private readonly WATCHDOG_REVEAL_MS = 180000;  // 3 Minutes before reveal
+  private readonly WATCHDOG_TIMEOUT_MS = 420000; // 7 Minutes
   private readonly WATCHDOG_MIN_WAVE = 4;        // Skip early waves
-  private ghostHuntActive = false;
   private readonly WATCHDOG_MIN_ZOMBIES = 1;
   private readonly WATCHDOG_MAX_ZOMBIES = 3;
 
@@ -285,9 +283,7 @@ class WaveManager extends hz.Component<typeof WaveManager> {
     // CLEANUP: Delete old ammo boxes from our tracking array
     this.cleanupOldAmmo();
 
-    // Reset Watchdog / Ghost Hunt
-    this.ghostHuntActive = false;
-    this.sendNetworkBroadcastEvent(Events.ghostHunt, { enabled: false });
+    // Reset stall watchdog
     this.lastActiveCount = -1;
     this.lastCountChangeTime = Date.now();
 
@@ -419,8 +415,9 @@ class WaveManager extends hz.Component<typeof WaveManager> {
           toSpawn: remaining
       });
 
-      // --- WATCHDOG v2.0 (GHOST HUNT) ---
-      // If 1-5 zombies remain, but count hasn't changed in 60s -> RESET
+      // --- STALL WATCHDOG ---
+      // If 1-3 zombies remain with nothing in flight/pending and count hasn't
+      // changed for WATCHDOG_TIMEOUT_MS, force a wave reset (zombie is stuck/lost).
       const watchdogEligible =
           wave >= this.WATCHDOG_MIN_WAVE &&
           active >= this.WATCHDOG_MIN_ZOMBIES &&
@@ -435,40 +432,17 @@ class WaveManager extends hz.Component<typeof WaveManager> {
               this.lastCountChangeTime = now;
           } else {
               const inactiveTime = now - this.lastCountChangeTime;
-              
-              // STAGE 1: Reveal (Proof of Life)
-              if (inactiveTime > this.WATCHDOG_REVEAL_MS && !this.ghostHuntActive) {
-                   console.log("[WaveManager] WATCHDOG: Potential stall detected. Revealing ghosts.");
-                   this.ghostHuntActive = true;
-                   this.sendNetworkBroadcastEvent(Events.ghostHunt, { enabled: true });
-              }
 
-              // STAGE 2: Reset
               if (inactiveTime > this.WATCHDOG_TIMEOUT_MS) {
                   console.log("[WaveManager] WATCHDOG: Wave stalled with " + active + " zombies. Resetting...");
-                  
-                  // Notify Players
                   this.sendNetworkBroadcastEvent(Events.playerDied, { name: "Wave reset due to zombie count" });
-                  
-                  // Reset Ghost Hunt
-                  this.ghostHuntActive = false;
-                  this.sendNetworkBroadcastEvent(Events.ghostHunt, { enabled: false });
-
-                  // Reset State to prevent infinite loop
                   this.lastActiveCount = -1;
                   this.lastCountChangeTime = now;
-                  
-                  // Trigger Reset
                   this.onWaveReset();
                   return;
               }
           }
       } else {
-          // Reset tracking if outside watchdog range
-          if (this.ghostHuntActive) {
-              this.ghostHuntActive = false;
-              this.sendNetworkBroadcastEvent(Events.ghostHunt, { enabled: false });
-          }
           this.lastActiveCount = -1;
       }
 

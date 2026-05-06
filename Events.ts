@@ -33,7 +33,6 @@ export const Events = {
   endGame: new hz.NetworkEvent<{}>('endGame'),
   newWave: new hz.LocalEvent<{ wave: number }>('newWave'),
   waveComplete: new hz.NetworkEvent<{ wave: number, duration: number }>('waveComplete'),
-  ghostHunt: new hz.NetworkEvent<{ enabled: boolean }>('ghostHunt'), // Reveals stuck zombies
 
   // --- ZOMBIE COUNTER ---
   updateZombieCount: new hz.NetworkEvent<{

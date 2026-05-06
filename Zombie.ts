@@ -48,11 +48,6 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
     snapToNavMesh: { type: hz.PropTypes.Boolean, default: true },
     /** Asset to spawn for floating damage numbers */
     floatingDamageAsset: { type: hz.PropTypes.Asset },
-    /** 
-     * OPTIONAL: Visual marker (light, glow, etc) to reveal zombie during Ghost Hunt.
-     * Use a Light Gizmo or glowing asset.
-     */
-    ghostHuntMarker: { type: hz.PropTypes.Entity },
   };
 
   // ============================================================================
@@ -207,7 +202,6 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
     this.connectNetworkBroadcastEvent(Events.zombieHitAnim, this.zombieHitAnim.bind(this));
     this.connectNetworkBroadcastEvent(Events.zombieDeath, this.zombieDeath.bind(this));
     this.connectNetworkBroadcastEvent(Events.gunshot, this.onGunshot.bind(this));
-    this.connectNetworkBroadcastEvent(Events.ghostHunt, this.onGhostHunt.bind(this));
     // AMMO SOUND AWARENESS: Ammo pickups make noise — nearby zombies investigate the position.
     this.connectLocalBroadcastEvent(Events.ammoPickedUp, this.onAmmoPickedUp.bind(this));
 
@@ -1146,19 +1140,6 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
       }, 625);
   }
 
-  /**
-   * Toggles the visual marker for Ghost Hunt mode.
-   * This provides "Proof of Life" to players when a wave is stuck.
-   */
-  private onGhostHunt(data: { enabled: boolean }): void {
-      if (!this.alive) return;
-      
-      const marker = this.props.ghostHuntMarker;
-      if (marker && marker.isValidReference.get()) {
-          // Toggle visibility of the marker entity
-          marker.visible.set(data.enabled);
-      }
-  }
 }
 
 hz.Component.register(Zombie);
