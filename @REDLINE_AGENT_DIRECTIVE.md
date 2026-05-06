@@ -335,6 +335,170 @@ if (this.isAuthority()) {
 
 ---
 
+## 2.13 — RESEARCHED HORIZON WORLDS RUNTIME BUGS (Meta Feedback / Community)
+
+The agent must treat Horizon Worlds as an unstable multiplayer runtime where editor behavior, published behavior, ownership, script recognition, async timing, and entity replication can silently diverge.
+
+For every issue below, perform: **DETECT → FIX/WORKAROUND → COMMENT → VALIDATE → REPORT**
+
+---
+
+### 2.13.A — Async Asset Spawn Failure (cross-world invite timing)
+
+**Source**: Meta Feedback investigations/2075746702830513
+
+`SpawnController.spawn()` / `world.spawnAsset()` can fail silently when players arrive via cross-world invite, because the asset runtime isn't ready in the first frame.
+
+**Required pattern**:
+
+- Always null-check spawn results and wrap in try/catch.
+- Never activate zombie AI immediately after spawn — defer by at least 1 tick.
+- Queue spawns; never burst-spawn all at once.
+- Add retry/backoff. Log failures with wave number, spawn point, asset, retry count.
+- Never let a failed spawn corrupt active zombie counts.
+
+**Status in Redline**: SpawnManager has 90s timeout, retry with controller replacement, and count-integrity guards. Cross-world join window: WeaponManager now adds a 200ms join delay.
+
+---
+
+### 2.13.B — Force Hold / attachToPlayer Silent Failure
+
+**Source**: Meta Feedback investigations/3169937169854190
+
+`attachToPlayer()` (Force Hold) can fail silently in published sessions, especially on first player spawn or when the player is moving. The weapon spawns but never attaches to the hand.
+
+**Required pattern**:
+
+- Never assume `attachToPlayer()` succeeded — it does not throw on failure.
+- Always wrap the call in try/catch with a warning log.
+- The weapon must remain `setWhoCanGrab([player])` as an implicit fallback.
+- The GunController's 1s handshake retry loop in `Gun.ts` provides a secondary recovery path.
+- Test: VR mode published world, solo join, cross-world invite join.
+
+**Status in Redline**: WeaponManager now wraps `attachToPlayer()` in a separate try/catch with warning log. GunController handshake retries every 1s until `ownerValid`. Weapon remains grabbable as fallback.
+
+---
+
+### 2.13.C — Missing TypeScript Component After Editor Update
+
+**Source**: Meta Feedback investigations/1181643596713201
+
+Desktop Editor may fail to instantiate TypeScript components ("Cannot instantiate missing TS component") after editor version updates.
+
+**Required pattern**:
+
+- Every script must: `class X extends hz.Component<typeof X>` with `hz.Component.register(X)` at file end.
+- Never put logic inside `static propsDefinition`.
+- Never use unsupported prop types (only Entity, Asset, Number, Boolean, String, Vec3, Color).
+- Preserve all class names and filenames — renaming breaks editor attachments.
+- After any editor update: verify all components still appear and resolve.
+
+**Status in Redline**: All scripts follow correct pattern. ✅ No code changes needed — purely a validation checklist item.
+
+---
+
+### 2.13.D — entity.getComponents() Ownership Failure
+
+**Source**: Meta Community forums
+
+`entity.getComponents()` may return empty locally for entities whose ownership history differs between clients. Two players looking at the same zombie may get different getComponents() results.
+
+**Required pattern**:
+
+- Never use `getComponents()` as the source of truth for combat.
+- Use a **central module-level registry** (Map keyed by entity ID) instead.
+- Register on spawn/revive; unregister on death/cleanup.
+
+**Status in Redline**: Combat uses `NetworkEvent` (hitZombie) delivery — no `getComponents()` in the combat path. `ZombieUpdateManager` provides the central zombie registry (Map<bigint, IUpdatable>). ✅ Already safe.
+
+---
+
+### 2.13.E — Async Interval Fires Before Player/Entity Ref Is Assigned
+
+**Source**: Meta Community forums (async-setinterval-issue-spawned-asset)
+
+`setInterval` callbacks can fire before `this.player`, `this.owner`, or spawned entity refs are assigned, causing undefined errors that silently break AI or HUD logic.
+
+**Required pattern**:
+
+- Always guard every async callback with ref validation:
+
+```typescript
+if (!this.initialized || !this.trackedPlayer || !this.entity.isValidReference.get()) return;
+```
+
+- Track an `initialized` flag; never set timers before refs are confirmed.
+- Cancel all timers in `cleanup()`.
+
+**Status in Redline**: GunController defers all logic until `initializeForPlayer()` (after handshake). ZombieSpawnPoint guards processQueue with `isEntityValid()`. ZombieUpdateManager uses `isValidReference` guard at top of every `update()`. ✅ Already safe.
+
+---
+
+### 2.13.F — Published World Differs From Editor Preview
+
+**Source**: Meta Community forums
+
+Published worlds differ from Desktop Editor preview in async timing, ownership, replication, asset loading, and VR input. An issue absent in editor preview may be live-breaking in the published world.
+
+**Required validation matrix before any release**:
+
+```text
+[ ] Desktop Editor preview
+[ ] VR preview (Quest headset)
+[ ] Published private test world
+[ ] Solo player
+[ ] 2+ players simultaneously
+[ ] Late joiner (join mid-wave)
+[ ] Player invited from another Horizon world
+[ ] Player respawn mid-wave
+[ ] Weapon pickup/drop/re-equip
+[ ] High zombie count wave (15 concurrent)
+[ ] Wave reset / game restart
+[ ] AFK player timeout + rejoin
+```
+
+Any issue that only appears in published mode must be logged as:
+
+```text
+PUBLISHED-ONLY HORIZON ISSUE
+Symptom:
+Repro steps:
+Affected system:
+Workaround attempted:
+Remaining manual test required:
+```
+
+---
+
+### 2.13.G — UI / HUD Update Hitching
+
+Throttle all HUD text updates. Never call `.text.set()` (TextGizmo) or binding `.set()` more than 10×/second. Cache previous value and only update on change.
+
+**Status in Redline**: HUD uses `ui.Binding` (reactive, Horizon handles deduplication). Zombie count broadcasts throttled to 250ms minimum. Clock updates every 1000ms. ✅ Already safe.
+
+---
+
+### 2.13.H — Unknown Engine Bug Protocol
+
+If behavior cannot be explained by project code, file a suspected engine bug report:
+
+```text
+HORIZON SUSPECTED ENGINE BUG
+Symptom:
+Editor or published:
+Solo or multiplayer:
+Device (Quest 2/3/PC):
+Script/component:
+Exact repro steps:
+Expected behavior:
+Actual behavior:
+Workaround attempted:
+Related known issue:
+Needs Meta Feedback Center report? YES/NO
+```
+
+---
+
 ## 🔫 PHASE 3 — GAME-SPECIFIC SYSTEM AUDITS
 
 ### 3.1 — Wave Manager Audit

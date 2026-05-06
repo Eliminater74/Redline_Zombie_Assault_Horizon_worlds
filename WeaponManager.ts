@@ -101,7 +101,6 @@ class WeaponManager extends hz.Component<typeof WeaponManager> {
 
   /**
    * Called when a player joins the world.
-   * Spawns weapons immediately without delay.
    */
   private onPlayerJoin(player: hz.Player): void {
     if (!this.isServer()) return;
@@ -111,12 +110,22 @@ class WeaponManager extends hz.Component<typeof WeaponManager> {
     if (this.playerControllers.has(player.id) || this.spawningPlayers.has(player.id)) {
       return;
     }
-    
+
     // Reset spawn attempts for this player
     this.spawnAttempts.set(player.id, 0);
-    
-    // OPTIMIZATION: No delay - spawn immediately
-    this.spawnWeaponsForPlayer(player);
+
+    // HORIZON BUG WORKAROUND: SpawnController.spawn() can fail when a player arrives
+    // via a cross-world invite because the asset runtime isn't ready in the first tick.
+    // A 200ms delay avoids the failure window without any noticeable UX impact.
+    // (Meta Feedback: investigations/2075746702830513)
+    const joinTimer = this.async.setTimeout(() => {
+      const timerIndex = this.retryTimers.indexOf(joinTimer);
+      if (timerIndex > -1) this.retryTimers.splice(timerIndex, 1);
+      if (!player.isValidReference.get()) return;
+      if (this.playerControllers.has(player.id) || this.spawningPlayers.has(player.id)) return;
+      this.spawnWeaponsForPlayer(player);
+    }, 200);
+    this.retryTimers.push(joinTimer);
   }
 
   /**
@@ -215,10 +224,20 @@ class WeaponManager extends hz.Component<typeof WeaponManager> {
                     const grabbable = child.as(hz.GrabbableEntity);
                     if (grabbable) {
                       grabbable.setWhoCanGrab([player]);
-                      
+
                       const attachable = child.as(hz.AttachableEntity);
                       if (attachable) {
-                        attachable.attachToPlayer(player, hz.AttachablePlayerAnchor.Torso);
+                        // HORIZON BUG WORKAROUND: attachToPlayer() (Force Hold) can fail
+                        // silently in published sessions, especially on first player spawn.
+                        // (Meta Feedback: investigations/3169937169854190)
+                        // We try immediately; if it fails, the GunController handshake
+                        // (1s retry loop in Gun.ts) provides an independent recovery path.
+                        // The weapon also remains grabbable as an implicit fallback.
+                        try {
+                          attachable.attachToPlayer(player, hz.AttachablePlayerAnchor.Torso);
+                        } catch (attachErr) {
+                          console.warn(`[WeaponManager] attachToPlayer failed for ${player.name.get()} — weapon grabbable as fallback: ${attachErr}`);
+                        }
                       }
                     }
                   } catch (e) {
