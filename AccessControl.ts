@@ -15,13 +15,11 @@ import * as hz from 'horizon/core';
 /** Full admin access (can do everything) */
 export const ADMINS: string[] = [
   "Eliminater74",
-  "EliminatorPK",
 ];
 
 /** Creators and moderators */
 export const MODS: string[] = [
-  "saweetlady",
-  "Andrew391"
+  "",
 ];
 
 /** World editors (can edit but limited powers) */
