@@ -101,7 +101,9 @@ class WaveManager extends hz.Component<typeof WaveManager> {
     lichZombie: { type: hz.PropTypes.Asset },
     /** Henchman/Brute zombie prefab asset (New Variant) */
     henchmanZombie: { type: hz.PropTypes.Asset },
-    
+    /** Samurai zombie prefab asset (New Variant) */
+    samuraiZombie: { type: hz.PropTypes.Asset },
+
     /** Ammo pickup prefab asset */
     ammo: { type: hz.PropTypes.Asset },
     /** Reference to the HUD entity for UI updates */

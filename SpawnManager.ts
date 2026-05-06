@@ -220,6 +220,7 @@ export class SpawnManager {
       if (this.props.skeletonZombie) variants.push(this.props.skeletonZombie);
       if (this.props.lichZombie) variants.push(this.props.lichZombie);
       if (this.props.henchmanZombie) variants.push(this.props.henchmanZombie);
+      if (this.props.samuraiZombie) variants.push(this.props.samuraiZombie);
       if (variants.length === 0) return;
 
       // Load one controller per variant first — guarantees all bundles get cached.
@@ -527,6 +528,7 @@ export class SpawnManager {
       if (this.props.skeletonZombie) variants.push(this.props.skeletonZombie);
       if (this.props.lichZombie) variants.push(this.props.lichZombie);
       if (this.props.henchmanZombie) variants.push(this.props.henchmanZombie);
+      if (this.props.samuraiZombie) variants.push(this.props.samuraiZombie);
       if (variants.length === 0) return null;
       const prefab = variants[Math.floor(Math.random() * variants.length)];
       return new hz.SpawnController(prefab, new hz.Vec3(0, -1500, 0), hz.Quaternion.one, hz.Vec3.one);
