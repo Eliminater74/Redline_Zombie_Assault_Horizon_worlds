@@ -144,4 +144,10 @@ export const Events = {
   requestGameReset: new hz.NetworkEvent<{ playerName: string }>('requestGameReset'),
   requestWaveReset: new hz.NetworkEvent<{}>('requestWaveReset'),
   requestWaveSkip: new hz.NetworkEvent<{}>('requestWaveSkip'),
+
+  // --- HUD HEALTH EVENTS ---
+  // Broadcast by any script (player trigger, server watchdog, or admin command) to
+  // force the HUD to re-request all current state from the server. Useful when a
+  // player reports their HUD is showing stale data or the clock has stopped ticking.
+  requestHudRefresh: new hz.NetworkEvent<{}>('requestHudRefresh'),
 };

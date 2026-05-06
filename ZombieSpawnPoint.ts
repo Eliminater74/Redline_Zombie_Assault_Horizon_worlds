@@ -19,6 +19,11 @@ class ZombieSpawnPoint extends hz.Component<typeof ZombieSpawnPoint> {
   private lastSpawnTime = 0;
   // HORIZON BUG WORKAROUND: Timer/Interval race conditions after destroy — store handle to cancel in cleanup().
   private queueInterval: number | null = null;
+  // INVISIBLE ZOMBIE FIX: Tracked handles for delayed reviveZombie broadcasts.
+  // Each processed zombie schedules its revive 200ms after position is set, giving
+  // Horizon time to replicate the entity's position to clients before they receive
+  // the reviveZombie event and try to initialize the component.
+  private pendingReviveTimers: number[] = [];
 
   preStart(): void {
     // Listen for zombies being assigned to this spawn point
@@ -45,6 +50,9 @@ class ZombieSpawnPoint extends hz.Component<typeof ZombieSpawnPoint> {
       this.async.clearInterval(this.queueInterval);
       this.queueInterval = null;
     }
+    // Cancel any pending reviveZombie broadcasts so they don't fire on a dead component.
+    for (const t of this.pendingReviveTimers) this.async.clearTimeout(t);
+    this.pendingReviveTimers = [];
   }
 
   /**
@@ -63,8 +71,11 @@ class ZombieSpawnPoint extends hz.Component<typeof ZombieSpawnPoint> {
    */
   private queueZombie(data: { zombie: hz.Entity, health: number, speed: number, wave: number }) {
     if (data.zombie) {
-      // FIX 2: Prevent adding the exact same zombie twice if event fires double
-      if (!this.zombieQueue.find(item => item.zombie === data.zombie)) {
+      // FIX 2: Prevent adding the exact same zombie twice if event fires double.
+      // HORIZON BUG WORKAROUND: Entity wrappers from different call sites are different
+      // JS objects for the same entity — reference equality (===) always returns false.
+      // Use entity.id (bigint) for reliable identity checks.
+      if (!this.zombieQueue.find(item => item.zombie.id === data.zombie.id)) {
          this.zombieQueue.push(data);
          this.processQueue();
       }
@@ -111,16 +122,29 @@ class ZombieSpawnPoint extends hz.Component<typeof ZombieSpawnPoint> {
         const currentRot = this.entity.rotation.get();
         zombie.rotation.set(currentRot);
 
-        // Trigger the zombie's wake-up behavior
-        // Ideally, rename this event to Events.zombieWakeUp to avoid confusion
-        this.sendNetworkBroadcastEvent(Events.reviveZombie, {
-            zombie: item.zombie,
-            health: item.health,
-            speed: item.speed,
-            wave: item.wave,
-            position: spawnPos
-        });
         this.lastSpawnTime = now;
+
+        // INVISIBLE ZOMBIE FIX: Delay the reviveZombie broadcast by 200ms to give
+        // Horizon time to replicate the entity's new position to all clients before
+        // they receive the event and attempt to initialize the Zombie component.
+        // Clients that receive reviveZombie before their entity is replicated get a
+        // failed isValidReference check and silently skip initialization, producing
+        // an invisible (or non-AI) zombie. The delay dramatically reduces that window.
+        const capturedItem = item;
+        const capturedPos = spawnPos;
+        let reviveTimer: number;
+        reviveTimer = this.async.setTimeout(() => {
+          const idx = this.pendingReviveTimers.indexOf(reviveTimer);
+          if (idx > -1) this.pendingReviveTimers.splice(idx, 1);
+          this.sendNetworkBroadcastEvent(Events.reviveZombie, {
+            zombie: capturedItem.zombie,
+            health: capturedItem.health,
+            speed: capturedItem.speed,
+            wave: capturedItem.wave,
+            position: capturedPos
+          });
+        }, 200);
+        this.pendingReviveTimers.push(reviveTimer);
     } catch (e) { /* Ignore entity errors */ }
   }
 

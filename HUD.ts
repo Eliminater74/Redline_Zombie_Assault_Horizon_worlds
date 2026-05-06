@@ -90,6 +90,11 @@ export class HUD extends ui.UIComponent<typeof HUD> {
   // Clock
   clockTime = new ui.Binding<string>('');
   private clockInterval: number | null = null;
+  // HUD FREEZE DETECTION: Track last clock tick to detect stalled intervals.
+  // If more than 3s pass without a tick, the interval has silently stalled —
+  // the watchdog restarts it so the player doesn't have to leave and rejoin.
+  private lastClockTick = 0;
+  private clockWatchdog: number | null = null;
 
   // WAVE STATE (for headshot multiplier - Global is fine for Wave)
   private currentWave = 1;
@@ -132,7 +137,12 @@ export class HUD extends ui.UIComponent<typeof HUD> {
     // Local Broadcasts (From other scripts on same client/server)
     this.connectLocalBroadcastEvent(Events.zombieProximity, this.onZombieProximity.bind(this));
     this.connectLocalBroadcastEvent(Events.playerHeadshot, (data) => this.onPlayerHeadshot(data.player));
-    
+
+    // HUD HEALTH: Listen for a refresh request (from player trigger, admin, or server watchdog).
+    // Re-requests current state from the server to unstick stale HUD data without the
+    // player having to leave and rejoin the world.
+    this.connectNetworkBroadcastEvent(Events.requestHudRefresh, this.onHudRefresh.bind(this));
+
     // Important Cleanup Hook
     this.connectCodeBlockEvent(this.entity, hz.CodeBlockEvents.OnPlayerExitWorld, this.onPlayerExitWorld.bind(this));
   }
@@ -156,10 +166,30 @@ export class HUD extends ui.UIComponent<typeof HUD> {
       h = h % 12 || 12;
       return `${h}:${m}:${s} ${ampm}`;
     };
-    this.clockTime.set(getTime());
-    this.clockInterval = this.async.setInterval(() => {
+
+    // HUD FREEZE DETECTION: Tick callback that tracks the last update time.
+    // If the watchdog detects no tick for >3s it restarts the interval.
+    const tick = () => {
       this.clockTime.set(getTime());
-    }, 1000);
+      this.lastClockTick = Date.now();
+    };
+    tick();
+    this.clockInterval = this.async.setInterval(tick, 1000);
+
+    // Watchdog: check every 5s that the clock is still ticking.
+    // If the Horizon async scheduler silently drops the interval, this restarts it
+    // so the player never needs to leave the world to fix a frozen HUD clock.
+    this.clockWatchdog = this.async.setInterval(() => {
+      if (Date.now() - this.lastClockTick > 3000) {
+        console.warn("[HUD] Clock watchdog: interval stalled, restarting.");
+        if (this.clockInterval !== null) {
+          this.async.clearInterval(this.clockInterval);
+          this.clockInterval = null;
+        }
+        tick();
+        this.clockInterval = this.async.setInterval(tick, 1000);
+      }
+    }, 5000);
   }
 
   // ---------------------------------------------------------
@@ -170,6 +200,10 @@ export class HUD extends ui.UIComponent<typeof HUD> {
     if (this.clockInterval !== null) {
       this.async.clearInterval(this.clockInterval);
       this.clockInterval = null;
+    }
+    if (this.clockWatchdog !== null) {
+      this.async.clearInterval(this.clockWatchdog);
+      this.clockWatchdog = null;
     }
     if (this.gameEndInterval !== null) {
       this.async.clearInterval(this.gameEndInterval);
@@ -495,6 +529,29 @@ export class HUD extends ui.UIComponent<typeof HUD> {
     this.async.setTimeout(() => {
       this.joinMsgVisible.set(false);
     }, 4000);
+  }
+
+  // ---------------------------------------------------------
+  // HUD REFRESH (Freeze Recovery)
+  // ---------------------------------------------------------
+  /**
+   * Forces the HUD to re-request all current state from the server.
+   * Triggered by Events.requestHudRefresh — broadcasted by a world trigger the
+   * player can interact with, by an admin command, or by the server watchdog.
+   * This unsticks stale HUD panels without the player leaving the world.
+   */
+  onHudRefresh(): void {
+    // Re-request current game status (wave, zombie count) from the server.
+    // WaveManager responds with statusReport which routes back through
+    // updateZombieCount / viewWave events.
+    this.sendNetworkBroadcastEvent(Events.requestStatus, {});
+
+    // Re-refresh the kill counter display for the local player.
+    this.killFeed.refreshKillCount();
+
+    // Reset the clock watchdog baseline so it doesn't immediately fire again.
+    this.lastClockTick = Date.now();
+    console.log("[HUD] HUD refresh requested — re-syncing state from server.");
   }
 
   // ---------------------------------------------------------

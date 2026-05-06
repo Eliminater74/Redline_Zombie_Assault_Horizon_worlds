@@ -116,6 +116,9 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
   private reviveCollisionTimer: number | null = null;
   // HIT RUSH: Stores the handle so cleanup() can cancel it if zombie dies mid-burst.
   private hitRushTimer: number | null = null;
+  // INVISIBLE ZOMBIE FIX: Delayed visibility pulse to force Horizon to re-replicate
+  // entity state to clients that received the entity after the reviveZombie broadcast.
+  private visibilityPulseTimer: number | null = null;
   private reviveGraceUntil = 0;
   private lastProcessedDamageSeq = 0;
   private lastProcessedGunshotSeq = 0;
@@ -294,6 +297,10 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
     if (this.hitRushTimer !== null) {
       this.async.clearTimeout(this.hitRushTimer);
       this.hitRushTimer = null;
+    }
+    if (this.visibilityPulseTimer !== null) {
+      this.async.clearTimeout(this.visibilityPulseTimer);
+      this.visibilityPulseTimer = null;
     }
     this.setTarget(null);
     unregisterZombie(this);
@@ -755,6 +762,10 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
       this.async.clearTimeout(this.hitRushTimer);
       this.hitRushTimer = null;
     }
+    if (this.visibilityPulseTimer !== null) {
+      this.async.clearTimeout(this.visibilityPulseTimer);
+      this.visibilityPulseTimer = null;
+    }
 
     // Wave-scaled aggression: faster attacks, wider reach, quicker brain at higher waves (caps at wave 30).
     const waveT = Math.min((this.spawnWave - 1) / 29, 1.0);
@@ -771,6 +782,25 @@ class Zombie extends hz.Component<typeof Zombie> implements IUpdatable {
     this.navigator.reset();
 
     this.lastAnimSpeed = 0;
+
+    // INVISIBLE ZOMBIE FIX (Horizon platform bug workaround):
+    // SpawnController.spawn() replicates the entity, but clients with higher latency
+    // may receive it AFTER the reviveZombie broadcast fires. Those clients' Zombie
+    // component never runs finishReviveClient(), leaving the entity in a stale invisible
+    // state. A delayed false→true toggle on the server forces Horizon to emit a fresh
+    // visibility replication packet that late-syncing clients will catch.
+    // Same-value sets are deduped by Horizon — the false→true toggle is intentional.
+    if (this.visibilityPulseTimer !== null) this.async.clearTimeout(this.visibilityPulseTimer);
+    this.visibilityPulseTimer = this.async.setTimeout(() => {
+      this.visibilityPulseTimer = null;
+      if (!this.alive) return;
+      try {
+        if (this.entity.isValidReference.get()) {
+          this.entity.visible.set(false);
+          this.entity.visible.set(true);
+        }
+      } catch (e) {}
+    }, 500);
   }
 
   /**
