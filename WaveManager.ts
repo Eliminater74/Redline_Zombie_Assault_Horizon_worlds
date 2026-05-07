@@ -272,11 +272,6 @@ class WaveManager extends hz.Component<typeof WaveManager> {
     this.waveStartTime = Date.now();
     this.sendLocalBroadcastEvent(Events.newWave, { wave });
 
-    // BUG FIX: Clear the death-sequence dedup map between waves. Each wave uses fresh
-    // zombie instances with reset seq counters, so old entries are stale and the Map
-    // would grow unboundedly over a long session (wave 40+ = hundreds of entries).
-    this.processedZombieDeathSeq.clear();
-
     // CLEANUP: Broadcast force cleanup to all ammo boxes (purge invisible/collected)
     this.sendNetworkBroadcastEvent(Events.forceCleanupAmmo, { keepCount: AMMO_WAVE_CARRYOVER });
 

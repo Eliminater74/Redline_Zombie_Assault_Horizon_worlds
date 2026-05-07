@@ -477,16 +477,25 @@ export class SpawnManager {
         // clearControllers() call. Without this, they call unload() on disposed controllers.
         const gen = this.waveGeneration;
         this.async.setTimeout(() => {
-            if (this.waveGeneration !== gen) return;
+            if (this.waveGeneration !== gen) {
+                // Wave was reset — clearControllers() already wiped dyingZombies, nothing to do.
+                return;
+            }
             controller.unload();
+            // BUG FIX: Do NOT clear dyingZombieIds here. Hand zombie to checkAndRecycle so it
+            // clears the dying state only AFTER confirming the controller has exited Active/Unloading.
+            // Clearing here (fixed 1s timer) races with the unload — if the controller is still
+            // Unloading when dyingCount hits 0, the win condition fires and startWave() disposes
+            // the Unloading controller without properly despawning the entity, leaving bodies on
+            // the ground and the active count stuck > 0.
             this.async.setTimeout(() => {
-                if (this.waveGeneration !== gen) return;
-                this.dyingZombies.delete(zombie);
-                try { this.dyingZombieIds.delete(zombie.id); } catch {}
-                this.killedZombiesCount++;
-                this.notifyUpdate();
-                this.checkAndRecycle(controller, gen);
-            }, 1000);
+                if (this.waveGeneration !== gen) {
+                    this.dyingZombies.delete(zombie);
+                    try { this.dyingZombieIds.delete(zombie.id); } catch {}
+                    return;
+                }
+                this.checkAndRecycle(controller, zombie, gen);
+            }, 500);
         }, ZOMBIE_REMOVAL_DELAY * 1000);
       } else {
         // BUG FIX: Guard against spurious refunds during forceKillAll() — isClearing is set
@@ -500,14 +509,35 @@ export class SpawnManager {
       }
   }
 
-  // BUG FIX: gen parameter lets us bail out if the wave was reset mid-recycle loop.
-  private checkAndRecycle(sc: hz.SpawnController, gen: number): void {
-      if (this.waveGeneration !== gen) return;
-      const state = sc.currentState.get();
-      if (state === hz.SpawnState.Active || state === hz.SpawnState.Loading || state === hz.SpawnState.Unloading) {
-          this.async.setTimeout(() => this.checkAndRecycle(sc, gen), 100);
+  // BUG FIX: zombie + gen parameters let us bail safely and own the dying-state cleanup.
+  // attempt caps at 100 (10s at 100ms each) to handle controllers stuck in Active/Unloading.
+  private checkAndRecycle(sc: hz.SpawnController, zombie: hz.Entity, gen: number, attempt: number = 0): void {
+      if (this.waveGeneration !== gen) {
+          // Wave was reset mid-recycle — clearControllers() wiped dyingZombies already.
+          // Still clear these defensively in case the reset happened between the two clears.
+          this.dyingZombies.delete(zombie);
+          try { this.dyingZombieIds.delete(zombie.id); } catch {}
           return;
       }
+      const state = sc.currentState.get();
+      const stillBusy = state === hz.SpawnState.Active || state === hz.SpawnState.Loading || state === hz.SpawnState.Unloading;
+      if (stillBusy) {
+          if (attempt < 100) {
+              this.async.setTimeout(() => this.checkAndRecycle(sc, zombie, gen, attempt + 1), 100);
+              return;
+          }
+          // 10s timeout: controller is stuck. Force through so the wave can end.
+          console.warn(`[SpawnManager] checkAndRecycle: controller stuck in state ${state} after 10s — force-disposing.`);
+      }
+
+      // Entity is despawned (or we forced past the stuck timeout).
+      // NOW it is safe to clear the dying state — getDyingCount() will drop,
+      // letting the win condition fire only after the entity is truly gone.
+      this.dyingZombies.delete(zombie);
+      try { this.dyingZombieIds.delete(zombie.id); } catch {}
+      this.killedZombiesCount++;
+      this.notifyUpdate();
+
       // Dispose recycled controller and replace with a fresh one.
       // Reused controllers silently hang on spawn() — always create fresh.
       this.reservedControllers.delete(sc);
