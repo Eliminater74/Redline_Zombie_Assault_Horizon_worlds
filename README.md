@@ -1,10 +1,10 @@
 # Redline: Zombie Assault
 
-[![Visitors](https://visitor-badge.laobi.icu/badge?page_id=Eliminater74.Redline_Zombie_Assult_Horizon_worlds&left_color=grey&right_color=crimson&left_text=Visitors)](https://github.com/Eliminater74/Redline_Zombie_Assult_Horizon_worlds)
-[![GitHub Stars](https://img.shields.io/github/stars/Eliminater74/Redline_Zombie_Assult_Horizon_worlds?style=flat&logo=github&color=yellow)](https://github.com/Eliminater74/Redline_Zombie_Assult_Horizon_worlds/stargazers)
-[![GitHub Forks](https://img.shields.io/github/forks/Eliminater74/Redline_Zombie_Assult_Horizon_worlds?style=flat&logo=github&color=blue)](https://github.com/Eliminater74/Redline_Zombie_Assult_Horizon_worlds/network/members)
-[![Last Commit](https://img.shields.io/github/last-commit/Eliminater74/Redline_Zombie_Assult_Horizon_worlds?style=flat&logo=git&color=brightgreen)](https://github.com/Eliminater74/Redline_Zombie_Assult_Horizon_worlds/commits/main)
-[![Repo Size](https://img.shields.io/github/repo-size/Eliminater74/Redline_Zombie_Assult_Horizon_worlds?style=flat&color=orange)](https://github.com/Eliminater74/Redline_Zombie_Assult_Horizon_worlds)
+[![Visitors](https://visitor-badge.laobi.icu/badge?page_id=Eliminater74.Redline_Zombie_Assault_Horizon_worlds&left_color=grey&right_color=crimson&left_text=Visitors)](https://github.com/Eliminater74/Redline_Zombie_Assault_Horizon_worlds)
+[![GitHub Stars](https://img.shields.io/github/stars/Eliminater74/Redline_Zombie_Assault_Horizon_worlds?style=flat&logo=github&color=yellow)](https://github.com/Eliminater74/Redline_Zombie_Assault_Horizon_worlds/stargazers)
+[![GitHub Forks](https://img.shields.io/github/forks/Eliminater74/Redline_Zombie_Assault_Horizon_worlds?style=flat&logo=github&color=blue)](https://github.com/Eliminater74/Redline_Zombie_Assault_Horizon_worlds/network/members)
+[![Last Commit](https://img.shields.io/github/last-commit/Eliminater74/Redline_Zombie_Assault_Horizon_worlds?style=flat&logo=git&color=brightgreen)](https://github.com/Eliminater74/Redline_Zombie_Assault_Horizon_worlds/commits/main)
+[![Repo Size](https://img.shields.io/github/repo-size/Eliminater74/Redline_Zombie_Assault_Horizon_worlds?style=flat&color=orange)](https://github.com/Eliminater74/Redline_Zombie_Assault_Horizon_worlds)
 [![TypeScript](https://img.shields.io/badge/TypeScript-4.7.4-3178C6?style=flat&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Platform](https://img.shields.io/badge/Platform-Meta%20Horizon%20Worlds-blueviolet?style=flat&logo=meta)](https://www.meta.com/horizon-worlds/)
 [![Version](https://img.shields.io/badge/Version-v26.1.4-red?style=flat)](CHANGELOG.md)
