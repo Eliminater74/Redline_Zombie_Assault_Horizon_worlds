@@ -10,7 +10,7 @@ import { spawnLocations } from 'ZombieSpawnPoint';
 
 // POOL CONFIG
 const MAX_CONCURRENT_ZOMBIES = 15;
-const ZOMBIE_REMOVAL_DELAY = 2.5; // Seconds
+const ZOMBIE_REMOVAL_DELAY = 3.0; // Seconds — allow death animation to finish before vanish
 const SPAWN_STAGGER_MS = 75;       // Reduced from 150ms — cuts wave-start ramp-up time in half
 const JANITOR_STUCK_MS = 150000;
 
@@ -477,11 +477,6 @@ export class SpawnManager {
         // different JS objects, so Set.has() by reference returns false. ID comparison is reliable.
         try { this.dyingZombieIds.add(zombie.id); } catch {}
 
-        // Immediately hide the body so no visual lingers during the unload delay.
-        // Belt-and-suspenders: SpawnController.unload() will properly remove the entity,
-        // but this guarantees instant disappearance regardless of how long unload takes.
-        try { if (zombie.isValidReference.get()) zombie.visible.set(false); } catch {}
-
         this.notifyUpdate();
 
         // BUG FIX: Capture current generation so these timers self-discard after a
@@ -492,6 +487,8 @@ export class SpawnManager {
                 // Wave was reset — clearControllers() already wiped dyingZombies, nothing to do.
                 return;
             }
+            // Hide just before unload so the death animation plays for the full delay window.
+            try { if (zombie.isValidReference.get()) zombie.visible.set(false); } catch {}
             controller.unload();
             // BUG FIX: Do NOT clear dyingZombieIds here. Hand zombie to checkAndRecycle so it
             // clears the dying state only AFTER confirming the controller has exited Active/Unloading.
