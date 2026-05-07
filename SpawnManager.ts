@@ -10,7 +10,7 @@ import { spawnLocations } from 'ZombieSpawnPoint';
 
 // POOL CONFIG
 const MAX_CONCURRENT_ZOMBIES = 15;
-const ZOMBIE_REMOVAL_DELAY = 5.0; // Seconds — allow death animation to finish before vanish
+const ZOMBIE_REMOVAL_DELAY = 4.0; // Seconds — allow death animation to finish before vanish
 const SPAWN_STAGGER_MS = 75;       // Reduced from 150ms — cuts wave-start ramp-up time in half
 const JANITOR_STUCK_MS = 150000;
 
