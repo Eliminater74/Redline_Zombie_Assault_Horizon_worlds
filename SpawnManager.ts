@@ -80,6 +80,11 @@ export class SpawnManager {
      this.controllers = this.controllers.filter(sc => {
          const state = sc.currentState.get();
          if (state === hz.SpawnState.Loaded || state === hz.SpawnState.Loading) return true;
+         // Unload before disposing so the entity is properly despawned.
+         // dispose() alone on an Active controller orphans the entity — body stays in the world.
+         if (state === hz.SpawnState.Active || state === hz.SpawnState.Unloading) {
+             try { sc.unload(); } catch {}
+         }
          try { sc.dispose(); } catch {}
          return false;
      });
@@ -471,6 +476,12 @@ export class SpawnManager {
         // BUG FIX: Track by ID — entity wrappers from rootEntities.get() vs event data are
         // different JS objects, so Set.has() by reference returns false. ID comparison is reliable.
         try { this.dyingZombieIds.add(zombie.id); } catch {}
+
+        // Immediately hide the body so no visual lingers during the unload delay.
+        // Belt-and-suspenders: SpawnController.unload() will properly remove the entity,
+        // but this guarantees instant disappearance regardless of how long unload takes.
+        try { if (zombie.isValidReference.get()) zombie.visible.set(false); } catch {}
+
         this.notifyUpdate();
 
         // BUG FIX: Capture current generation so these timers self-discard after a
@@ -520,14 +531,23 @@ export class SpawnManager {
           return;
       }
       const state = sc.currentState.get();
-      const stillBusy = state === hz.SpawnState.Active || state === hz.SpawnState.Loading || state === hz.SpawnState.Unloading;
+      const roots = (() => { try { return sc.rootEntities.get(); } catch { return null; } })();
+      const hasRoots = !!roots && roots.length > 0;
+      // Also wait when Loaded+roots: Horizon can keep the entity alive in Loaded state.
+      // Disposing a Loaded+roots controller skips the entity despawn — body stays in world.
+      const stillBusy =
+          state === hz.SpawnState.Active ||
+          state === hz.SpawnState.Loading ||
+          state === hz.SpawnState.Unloading ||
+          (state === hz.SpawnState.Loaded && hasRoots);
       if (stillBusy) {
           if (attempt < 100) {
               this.async.setTimeout(() => this.checkAndRecycle(sc, zombie, gen, attempt + 1), 100);
               return;
           }
-          // 10s timeout: controller is stuck. Force through so the wave can end.
-          console.warn(`[SpawnManager] checkAndRecycle: controller stuck in state ${state} after 10s — force-disposing.`);
+          // 10s timeout: force one more unload attempt, then dispose regardless.
+          console.warn(`[SpawnManager] checkAndRecycle: controller stuck (state=${state} roots=${hasRoots}) after 10s — force-unloading.`);
+          try { sc.unload(); } catch {}
       }
 
       // Entity is despawned (or we forced past the stuck timeout).
