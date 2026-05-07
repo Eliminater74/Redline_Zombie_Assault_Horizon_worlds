@@ -2,6 +2,28 @@
 
 ---
 
+## [26.1.4] — 2026-05-07
+
+### Stability & Bug Fixes
+
+- **SpawnManager.ts** — Dead zombie bodies now vanish immediately on kill. Fixed bodies staying on the ground and blocking wave completion by setting `visible = false` instantly on confirmed death, then polling the SpawnController state until the engine confirms the entity is fully gone before recycling the slot.
+- **SpawnManager.ts** — Fixed ghost zombie counts causing waves to never end. Root cause was `processedZombieDeathSeq.clear()` in `newWave()` — late-arriving duplicate death events from the previous wave bypassed deduplication after the clear, hit `handleZombieDeath` with no matching controller, and issued `zombiesRemainingToSpawn++` creating permanent phantom counts. Fix: removed the clear entirely.
+- **SpawnManager.ts** — `checkAndRecycle` now handles the `Loaded + roots` SpawnController state (Horizon can hold a live entity in Loaded state). Added 10-second hard timeout with force-unload for stuck controllers.
+- **SpawnManager.ts** / **WaveManager.ts** — `startWave()` now calls `sc.unload()` before `sc.dispose()` for Active and Unloading controllers so entities are properly despawned on wave transitions instead of being orphaned.
+
+### New Systems
+
+- **AFKWatchdog.ts** — Added 3-stage freeze recovery system. Stage 1: soft AFK warning at 20s idle. Stage 2: freeze recovery teleport at 35s stationary (fires `freezeRecovery` event). Stage 3: hard kick at 90s idle.
+- **PlayerManager.ts** — Added `onFreezeRecovery` handler. When the watchdog detects a stationary player, the server teleports them to a random alive spawn point using `SpawnPointGizmo.teleportPlayer()` — a native engine call that may unstick a frozen Horizon client without requiring a rejoin.
+- **WaveManager.ts** / **SpawnManager.ts** — Added `samuraiZombie` prop slot for the upcoming Samurai enemy variant. Assign the NPC asset in the editor to enable it.
+
+### Removed Systems
+
+- **Zombie.ts** / **Events.ts** / **WaveManager.ts** — Removed ghost hunt marker system (non-functional, wasted entities in zombie prefabs).
+- **Events.ts** — Removed `requestHudRefresh` event (HUD refresh button approach replaced by server-side freeze recovery).
+
+---
+
 ## [26.1.3] — 2026-05-03
 
 ### Zombie AI
